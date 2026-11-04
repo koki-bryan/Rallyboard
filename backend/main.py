@@ -267,6 +267,30 @@ def create_event(data: EventIn, db: Session = Depends(db_session), coach: User =
     db.commit()
     return {'id': event.id}
 
+@app.delete('/api/v1/events/{event_id}')
+def delete_event(event_id: int, db: Session = Depends(db_session), _: User = Depends(require_coach)):
+    event = db.scalar(select(Event).where(Event.id == event_id).with_for_update())
+    if not event:
+        raise HTTPException(404, 'Event not found')
+    match_ids = db.scalars(select(Match.id).where(Match.event_id == event_id)).all()
+    player_ids = db.scalars(select(Participant.user_id).where(Participant.event_id == event_id)).all()
+    guest_ids = [user.id for user in db.scalars(select(User).where(User.id.in_(player_ids), User.role == 'guest'))]
+    if match_ids:
+        db.execute(delete(Audit).where(Audit.match_id.in_(match_ids)))
+        db.execute(delete(SetScore).where(SetScore.match_id.in_(match_ids)))
+        db.execute(delete(MatchSchedule).where(MatchSchedule.match_id.in_(match_ids)))
+        db.execute(delete(Match).where(Match.id.in_(match_ids)))
+    db.execute(delete(Participant).where(Participant.event_id == event_id))
+    db.execute(delete(EventMember).where(EventMember.event_id == event_id))
+    db.execute(delete(EventAccess).where(EventAccess.event_id == event_id))
+    db.delete(event)
+    db.flush()
+    for guest_id in guest_ids:
+        if not db.scalar(select(Participant.id).where(Participant.user_id == guest_id)):
+            db.delete(db.get(User, guest_id))
+    db.commit()
+    return {'ok': True}
+
 @app.post('/api/v1/events/{event_id}/players')
 def add_player(event_id: int, data: AddPlayerIn, db: Session = Depends(db_session), _: User = Depends(require_coach)):
     event = db.scalar(select(Event).where(Event.id == event_id).with_for_update())
@@ -373,29 +397,34 @@ def standings(ids: list[int], names: dict[int, str], matches: list[Match]):
             b['points_won'] += s.player2_points; b['points_lost'] += s.player1_points
             a['sets_won' if s.player1_points > s.player2_points else 'sets_lost'] += 1
             b['sets_won' if s.player2_points > s.player1_points else 'sets_lost'] += 1
-    rows = list(stats.values())
-    def key(row):
-        return (row['wins'], row['sets_won']-row['sets_lost'], row['points_won']-row['points_lost'])
-    rows.sort(key=key, reverse=True)
-    # Head to head applies only where exactly two players share all numeric tie breakers.
-    i = 0
-    while i < len(rows):
-        j = i + 1
-        while j < len(rows) and key(rows[j]) == key(rows[i]): j += 1
-        if j-i == 2:
-            direct = next((m for m in matches if m.status == 'completed' and {m.player1_id, m.player2_id} == {rows[i]['player_id'], rows[i+1]['player_id']}), None)
-            if direct and direct.winner_id == rows[i+1]['player_id']:
-                rows[i], rows[i+1] = rows[i+1], rows[i]
-        i = j
-    for i, row in enumerate(rows):
-        row['set_difference'] = row['sets_won']-row['sets_lost']
-        row['point_difference'] = row['points_won']-row['points_lost']
-        if i == 0: row['rank'] = 1
-        else:
-            prev = rows[i-1]
-            tied = key(row) == key(prev)
-            direct = next((m for m in matches if m.status == 'completed' and {m.player1_id, m.player2_id} == {row['player_id'], prev['player_id']}), None)
-            row['rank'] = prev['rank'] if tied and (not direct or len([r for r in rows if key(r)==key(row)]) > 2) else i+1
+    def record(row):
+        return (row['wins'], -row['losses'])
+
+    def set_points(row):
+        return (row['sets_won'] - row['sets_lost'], row['points_won'] - row['points_lost'])
+
+    by_record = {}
+    for row in stats.values():
+        by_record.setdefault(record(row), []).append(row)
+    rows = []
+    for match_record in sorted(by_record, reverse=True):
+        group = sorted(by_record[match_record], key=set_points, reverse=True)
+        direct_decides = False
+        if len(group) == 2:
+            direct = next((match for match in matches if match.status == 'completed'
+                           and {match.player1_id, match.player2_id} == {group[0]['player_id'], group[1]['player_id']}), None)
+            if direct:
+                group.sort(key=lambda row: row['player_id'] == direct.winner_id, reverse=True)
+                direct_decides = True
+        for row in group:
+            row['set_difference'] = row['sets_won'] - row['sets_lost']
+            row['point_difference'] = row['points_won'] - row['points_lost']
+            previous = rows[-1] if rows else None
+            if previous is None or record(row) != record(previous) or direct_decides or set_points(row) != set_points(previous):
+                row['rank'] = len(rows) + 1
+            else:
+                row['rank'] = previous['rank']
+            rows.append(row)
     return rows
 
 @app.get('/api/v1/events/{event_id}')

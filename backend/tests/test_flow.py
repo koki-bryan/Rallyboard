@@ -65,6 +65,69 @@ class FlowTests(unittest.TestCase):
                 players = [p for r, a, b in schedule if r == round_number for p in (a, b)]
                 self.assertEqual(len(players), len(set(players)))
 
+    def test_losses_break_win_tie_before_sets_and_points(self):
+        names = {1: 'Martin', 2: 'Jane', 3: 'Alex', 4: 'Blair', 5: 'Casey'}
+        def completed(a, b, scores):
+            wins_a = sum(left > right for left, right in scores)
+            wins_b = len(scores) - wins_a
+            match = main.Match(event_id=1, player1_id=a, player2_id=b,
+                winner_id=a if wins_a > wins_b else b, status='completed')
+            match.sets = [main.SetScore(number=i, player1_points=left, player2_points=right)
+                          for i, (left, right) in enumerate(scores, 1)]
+            return match
+        matches = [
+            completed(1, 3, [(11, 2), (11, 2), (11, 2)]),
+            completed(1, 4, [(11, 9), (11, 9), (9, 11), (9, 11), (9, 11)]),
+            completed(1, 5, [(11, 9), (11, 9), (9, 11), (9, 11), (9, 11)]),
+            completed(2, 4, [(11, 9), (9, 11), (11, 9), (9, 11), (11, 9)]),
+            completed(2, 3, [(2, 11), (2, 11), (2, 11)]),
+        ]
+        ranked = main.standings(list(names), names, matches)
+        martin = next(row for row in ranked if row['name'] == 'Martin')
+        jane = next(row for row in ranked if row['name'] == 'Jane')
+        self.assertEqual((martin['wins'], martin['losses']), (1, 2))
+        self.assertEqual((jane['wins'], jane['losses']), (1, 1))
+        self.assertGreater(martin['set_difference'], jane['set_difference'])
+        self.assertLess(jane['rank'], martin['rank'])
+
+    def test_head_to_head_precedes_sets_for_two_player_record_tie(self):
+        names = {1: 'Me', 2: 'Kristian', 3: 'Alex', 4: 'Blair'}
+        def completed(a, b, scores):
+            wins_a = sum(left > right for left, right in scores)
+            match = main.Match(event_id=1, player1_id=a, player2_id=b,
+                winner_id=a if wins_a > len(scores) - wins_a else b, status='completed')
+            match.sets = [main.SetScore(number=i, player1_points=left, player2_points=right)
+                          for i, (left, right) in enumerate(scores, 1)]
+            return match
+        matches = [
+            completed(1, 2, [(11, 9), (11, 9), (9, 11), (9, 11), (9, 11)]),
+            completed(1, 3, [(11, 2), (11, 2), (11, 2)]),
+            completed(2, 4, [(2, 11), (2, 11), (2, 11)]),
+        ]
+        ranked = main.standings(list(names), names, matches)
+        me = next(row for row in ranked if row['name'] == 'Me')
+        kristian = next(row for row in ranked if row['name'] == 'Kristian')
+        self.assertEqual((me['wins'], me['losses']), (1, 1))
+        self.assertEqual((kristian['wins'], kristian['losses']), (1, 1))
+        self.assertGreater(me['set_difference'], kristian['set_difference'])
+        self.assertLess(kristian['rank'], me['rank'])
+
+    def test_delete_event_removes_results_and_roster(self):
+        coach = self.players[2]
+        coach.role = 'coach'
+        self.db.commit()
+        created = main.create_event(main.EventIn(name='Delete me', best_of=5, event_password='secret12'), self.db, coach)
+        event_id = created['id']
+        a = main.add_player(event_id, main.AddPlayerIn(name='Guest A'), self.db, coach)
+        main.add_player(event_id, main.AddPlayerIn(name='Guest B'), self.db, coach)
+        main.generate_schedule(event_id, self.db, coach)
+        fixture = self.db.query(main.Match).filter_by(event_id=event_id).one()
+        main.save_result(self.db, fixture, main.ResultIn(sets=[(11, 3), (11, 4), (11, 5)]), coach, 'before_submission')
+        self.assertEqual(main.delete_event(event_id, self.db, coach), {'ok': True})
+        self.assertIsNone(self.db.get(main.Event, event_id))
+        self.assertEqual(self.db.query(main.Match).filter_by(event_id=event_id).count(), 0)
+        self.assertIsNone(self.db.get(main.User, a['id']))
+
     def test_score_validation_and_standings(self):
         with self.assertRaises(main.HTTPException):
             main.validate_result(main.ResultIn(sets=[(11,2),(12,9),(11,5)]),self.match,5)
