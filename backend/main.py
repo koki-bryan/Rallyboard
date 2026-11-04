@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint, create_engine, delete, select
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint, create_engine, delete, select, update
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 
 load_dotenv(Path(__file__).with_name('.env'))
@@ -110,7 +110,7 @@ class Audit(Base):
     snapshot: Mapped[str] = mapped_column(String(2000))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
-app = FastAPI(title='Table Tennis Rankings')
+app = FastAPI(title='Rallyboard')
 app.add_middleware(CORSMiddleware, allow_origins=[FRONTEND_ORIGIN], allow_credentials=True, allow_methods=['*'], allow_headers=['*'])
 
 @app.on_event('startup')
@@ -191,11 +191,24 @@ class ResultIn(BaseModel):
 class RoleIn(BaseModel):
     role: Literal['player', 'coach']
 
+class EmailIn(BaseModel):
+    email: str
+    password: str
+
+class DeleteAccountIn(BaseModel):
+    password: str
+
+def normalized_email(value: str) -> str:
+    email = value.strip().lower()
+    if '@' not in email or email.endswith('@players.local.invalid') or len(email) > 255:
+        raise HTTPException(422, 'Valid email required')
+    return email
+
 @app.post('/api/v1/auth/signup')
 def signup(data: Signup, response: Response, db: Session = Depends(db_session)):
-    email = data.email.strip().lower()
-    if '@' not in email or email.endswith('@players.local.invalid') or len(data.password) < 8:
-        raise HTTPException(422, 'Valid email and password of at least 8 characters required')
+    email = normalized_email(data.email)
+    if len(data.password) < 8:
+        raise HTTPException(422, 'Password must have at least 8 characters')
     if db.scalar(select(User).where(User.email == email)):
         raise HTTPException(409, 'Email already registered')
     user = User(name=data.name.strip(), email=email, password_hash=hash_password(data.password))
@@ -233,6 +246,49 @@ def logout(response: Response, rankings_session: str | None = Cookie(None), db: 
 def me(user: User | None = Depends(current_user)):
     return user_data(user) if user else None
 
+@app.patch('/api/v1/auth/me')
+def update_email(data: EmailIn, db: Session = Depends(db_session), user: User = Depends(require_user)):
+    if not verify_password(data.password, user.password_hash):
+        raise HTTPException(403, 'Incorrect account password')
+    email = normalized_email(data.email)
+    existing = db.scalar(select(User.id).where(User.email == email, User.id != user.id))
+    if existing:
+        raise HTTPException(409, 'Email already registered')
+    user.email = email
+    db.commit()
+    return user_data(user)
+
+@app.delete('/api/v1/auth/me')
+def delete_account(data: DeleteAccountIn, response: Response, db: Session = Depends(db_session), user: User = Depends(require_user)):
+    if not verify_password(data.password, user.password_hash):
+        raise HTTPException(403, 'Incorrect account password')
+    # Keep historical matches and standings while removing the login identity.
+    referenced = any((
+        db.scalar(select(Event.id).where(Event.created_by == user.id).limit(1)),
+        db.scalar(select(Participant.id).where(Participant.user_id == user.id).limit(1)),
+        db.scalar(select(Match.id).where((Match.player1_id == user.id) | (Match.player2_id == user.id) |
+                                              (Match.winner_id == user.id) | (Match.submitted_by == user.id)).limit(1)),
+        db.scalar(select(Audit.id).where(Audit.actor_id == user.id).limit(1)),
+    ))
+    if referenced:
+        former = User(name=f'Former player #{user.id}', email=f'{uuid.uuid4().hex}@players.local.invalid',
+                      password_hash=hash_password(secrets.token_urlsafe(32)), role='guest')
+        db.add(former)
+        db.flush()
+        db.execute(update(Event).where(Event.created_by == user.id).values(created_by=former.id))
+        db.execute(update(Participant).where(Participant.user_id == user.id).values(user_id=former.id))
+        db.execute(update(Match).where(Match.player1_id == user.id).values(player1_id=former.id))
+        db.execute(update(Match).where(Match.player2_id == user.id).values(player2_id=former.id))
+        db.execute(update(Match).where(Match.winner_id == user.id).values(winner_id=former.id))
+        db.execute(update(Match).where(Match.submitted_by == user.id).values(submitted_by=former.id))
+        db.execute(update(Audit).where(Audit.actor_id == user.id).values(actor_id=former.id))
+    db.execute(delete(EventMember).where(EventMember.user_id == user.id))
+    db.execute(delete(LoginSession).where(LoginSession.user_id == user.id))
+    db.delete(user)
+    db.commit()
+    response.delete_cookie('rankings_session', path='/api')
+    return {'ok': True}
+
 @app.get('/api/v1/users')
 def users(db: Session = Depends(db_session), _: User = Depends(require_coach)):
     return [user_data(u) for u in db.scalars(select(User).where(User.role != 'guest').order_by(User.name))]
@@ -247,8 +303,11 @@ def change_role(user_id: int, data: RoleIn, db: Session = Depends(db_session), a
     return user_data(user)
 
 @app.get('/api/v1/events')
-def events(db: Session = Depends(db_session)):
-    return [{'id': e.id, 'name': e.name, 'best_of': e.best_of, 'status': e.status} for e in db.scalars(select(Event).order_by(Event.id.desc()))]
+def events(db: Session = Depends(db_session), user: User | None = Depends(current_user)):
+    memberships = set(db.scalars(select(EventMember.event_id).where(EventMember.user_id == user.id))) if user else set()
+    return [{'id': e.id, 'name': e.name, **({'best_of': e.best_of, 'status': e.status}
+            if user and (user.role in ('coach', 'admin') or e.id in memberships) else {})}
+            for e in db.scalars(select(Event).order_by(Event.id.desc()))]
 
 @app.post('/api/v1/events')
 def create_event(data: EventIn, db: Session = Depends(db_session), coach: User = Depends(require_coach)):
@@ -432,14 +491,18 @@ def event_detail(event_id: int, db: Session = Depends(db_session), user: User | 
     event = db.get(Event, event_id)
     if not event:
         raise HTTPException(404, 'Event not found')
+    if not user:
+        raise HTTPException(401, 'Sign in to view this event')
+    member = db.scalar(select(EventMember.id).where(EventMember.event_id == event_id, EventMember.user_id == user.id))
+    if user.role not in ('coach', 'admin') and not member:
+        raise HTTPException(403, 'Enter the event password to view this event')
     ids = db.scalars(select(Participant.user_id).where(Participant.event_id == event_id)).all()
     names = {u.id: u.name for u in db.scalars(select(User).where(User.id.in_(ids)))}
     matches = db.scalars(select(Match).where(Match.event_id == event_id).order_by(Match.id)).all()
     scheduled = {item.match_id: item for item in db.scalars(select(MatchSchedule).where(MatchSchedule.match_id.in_([m.id for m in matches])))} if matches else {}
     matches.sort(key=lambda m: (scheduled[m.id].sequence_number if m.id in scheduled else m.id))
     access = db.get(EventAccess, event_id)
-    member = user and db.scalar(select(EventMember.id).where(EventMember.event_id == event_id, EventMember.user_id == user.id))
-    can_score = bool(user and (user.role in ('coach', 'admin') or member))
+    can_score = True
     return {'id': event.id, 'name': event.name, 'best_of': event.best_of, 'status': event.status,
             'can_score': can_score, 'has_password': access is not None,
             'players': [{'id': i, 'name': names[i]} for i in ids],

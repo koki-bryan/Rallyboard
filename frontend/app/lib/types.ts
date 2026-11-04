@@ -38,7 +38,7 @@ export type Event = {
   standings: Standing[];
   matches: Match[];
 };
-export type EventItem = Pick<Event, "id" | "name" | "best_of" | "status">;
+export type EventItem = Pick<Event, "id" | "name"> & Partial<Pick<Event, "best_of" | "status">>;
 export const isCoach = (user: User | null) =>
   user?.role === "coach" || user?.role === "admin";
 export const initials = (name: string) =>

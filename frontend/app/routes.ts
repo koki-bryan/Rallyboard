@@ -10,6 +10,7 @@ export default [
     route("events/:eventId", "routes/event.tsx"),
     route("manage/new", "routes/create-event.tsx"),
     route("manage/accounts", "routes/accounts.tsx"),
+    route("profile", "routes/profile.tsx"),
     route("manage/events/:eventId", "routes/manage-event.tsx"),
   ]),
 ] satisfies RouteConfig;

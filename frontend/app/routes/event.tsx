@@ -4,14 +4,14 @@ import { MatchList } from "~/components/MatchList";
 import { PlayerSearch } from "~/components/PlayerSearch";
 import { ScoreDialog } from "~/components/ScoreDialog";
 import { Standings } from "~/components/Standings";
-import { api } from "~/lib/api";
+import { api, ApiError } from "~/lib/api";
 import { isCoach, type Event, type Match } from "~/lib/types";
 import { useApp } from "./app-layout";
 
 export default function EventPage() {
   const { eventId } = useParams();
   const navigate = useNavigate();
-  const { user, openAuth, refreshEvents } = useApp();
+  const { user, authReady, openAuth, refreshEvents } = useApp();
   const coach = isCoach(user);
   const [event, setEvent] = useState<Event | null>(null);
   const [error, setError] = useState("");
@@ -19,32 +19,58 @@ export default function EventPage() {
   const [playerSearch, setPlayerSearch] = useState("");
   const [editing, setEditing] = useState<Match | null>(null);
   const [busy, setBusy] = useState(false);
+  const [accessDenied, setAccessDenied] = useState(false);
   const refresh = useCallback(async () => {
     if (!eventId) return;
     setEvent(await api<Event>(`/events/${eventId}`));
   }, [eventId]);
   useEffect(() => {
     setEvent(null);
-    refresh().catch((cause) => setError((cause as Error).message));
-  }, [refresh, user?.id]);
+    setError("");
+    setAccessDenied(false);
+    if (!authReady || !user) return;
+    refresh().catch((cause) => {
+      if (cause instanceof ApiError && cause.status === 403) setAccessDenied(true);
+      else setError((cause as Error).message);
+    });
+  }, [refresh, user?.id, authReady]);
   async function join(eventForm: FormEvent) {
     eventForm.preventDefault();
-    if (!event) return;
+    if (!eventId) return;
     setError("");
     setBusy(true);
     try {
-      await api(`/events/${event.id}/join`, {
+      await api(`/events/${eventId}/join`, {
         method: "POST",
         body: JSON.stringify({ password }),
       });
       setPassword("");
+      setAccessDenied(false);
       await refresh();
+      await refreshEvents();
     } catch (cause) {
       setError((cause as Error).message);
     } finally {
       setBusy(false);
     }
   }
+  if (authReady && (!user || accessDenied))
+    return (
+      <section className="mx-auto flex min-h-[420px] max-w-[560px] flex-col justify-center rounded-xl border border-line bg-white p-7 md:p-10">
+        <div className="mb-3 text-[10px] font-extrabold tracking-[2px] text-blue">EVENT ACCESS</div>
+        <h1 className="mb-2 text-[30px] font-bold tracking-tight text-ink">{user ? "Enter the event password" : "Sign in to view this event"}</h1>
+        <p className="mb-6 text-sm leading-relaxed text-muted">{user ? "The password unlocks standings, match results, and score entry." : "Sign in or create an account, then enter the event password to see standings and matches."}</p>
+        {error && <p role="alert" className="mb-4 rounded-lg bg-red-soft p-3 text-sm text-red">{error}</p>}
+        {!user ? (
+          <button className="inline-flex min-h-10 items-center justify-center rounded-lg bg-blue px-5 py-2.5 text-sm font-bold text-white" onClick={openAuth}>Sign in or create account ↗</button>
+        ) : (
+          <form onSubmit={join} className="flex flex-col gap-3 sm:flex-row">
+            <input aria-label="Event password" className="min-h-10 flex-1 rounded-lg border border-line bg-surface px-3 py-2.5 text-ink outline-none focus:border-blue focus:ring-2 focus:ring-blue/20" type="password" minLength={6} maxLength={128} required placeholder="Event password" value={password} onChange={(input) => setPassword(input.target.value)} />
+            <button className="min-h-10 rounded-lg bg-blue px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50" disabled={busy}>Unlock event ↗</button>
+          </form>
+        )}
+      </section>
+    );
   async function removeEvent() {
     if (
       !event ||
@@ -140,47 +166,6 @@ export default function EventPage() {
           <span>{event.standings.length} players</span>
         </div>
       </div>
-      {user && !event.can_score && (
-        <section className="mb-[18px] flex flex-col items-start justify-between gap-5 rounded-xl border border-blue/20 bg-blue-soft p-5 lg:flex-row lg:items-center [&_h2]:my-1 [&_h2]:text-[19px] [&_h2]:font-bold [&_p]:max-w-[430px] [&_p]:text-[11px] [&_p]:text-muted [&_form]:flex [&_form]:w-full [&_form]:flex-wrap [&_form]:gap-2 lg:[&_form]:w-auto  [&_small]:text-[11px] [&_small]:text-red">
-          <div>
-            <div className="text-[10px] font-extrabold tracking-[2px] text-blue">EVENT ACCESS</div>
-            <h2>Have the event password?</h2>
-            <p>
-              Enter it once to unlock score entry. You can view standings
-              without joining.
-            </p>
-          </div>
-          <form onSubmit={join}>
-            <input
-              className="mt-2 block w-full rounded-lg border border-line bg-surface px-3 py-2.5 text-ink outline-none focus:border-blue focus:ring-2 focus:ring-blue/20"
-              type="password"
-              minLength={6}
-              required
-              placeholder="Event password"
-              value={password}
-              onChange={(input) => setPassword(input.target.value)}
-            />
-            <button
-              className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-extrabold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 bg-blue text-white"
-              disabled={busy || !event.has_password}
-            >
-              Unlock scoring ↗
-            </button>
-          </form>
-          {!event.has_password && (
-            <small>The coach needs to set a password first.</small>
-          )}
-        </section>
-      )}
-      {!user && (
-        <div className="mb-[18px] flex flex-wrap items-center gap-3 rounded-lg border border-yellow/25 bg-yellow-soft px-[18px] py-3 text-xs text-ink [&_strong]:text-[13px] [&_span]:min-w-[220px] [&_span]:flex-1 [&_a]:font-extrabold [&_a]:text-yellow-ink">
-          <strong>Want to enter scores?</strong>
-          <span>Sign in, then enter the event password to unlock scoring.</span>
-          <button className="whitespace-nowrap border-0 bg-transparent px-0.5 py-1 text-[11px] font-extrabold text-blue hover:underline" onClick={openAuth}>
-            Sign in ↗
-          </button>
-        </div>
-      )}
       {event.status === "draft" && (
         <div className="mb-[18px] flex flex-wrap items-center gap-3 rounded-lg border border-yellow/25 bg-yellow-soft px-[18px] py-3 text-xs text-ink [&_strong]:text-[13px] [&_span]:min-w-[220px] [&_span]:flex-1 [&_a]:font-extrabold [&_a]:text-yellow-ink">
           <strong>Roster in progress</strong>

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { api } from "~/lib/api";
-import { initials, isCoach, type Event, type User } from "~/lib/types";
+import { isCoach, type Event, type User } from "~/lib/types";
+import { PlayerAvatar } from "~/components/PlayerAvatar";
 import { useApp } from "./app-layout";
 
 export default function ManageEvent() {
@@ -117,7 +118,7 @@ export default function ManageEvent() {
         <div className="mb-4 flex flex-wrap gap-2 [&>div]:flex [&>div]:items-center [&>div]:gap-2 [&>div]:rounded-lg [&>div]:border [&>div]:border-line [&>div]:px-2 [&>div]:py-1.5 [&>div]:text-xs [&>span]:text-xs [&>span]:text-muted">
           {event.players.map((player) => (
             <div key={player.id}>
-              <span className="grid size-[31px] shrink-0 place-items-center rounded-full bg-blue-soft text-[11px] font-extrabold text-blue">{initials(player.name)}</span>
+              <PlayerAvatar playerId={player.id} name={player.name} />
               <strong>{player.name}</strong>
               {draft && (
                 <button
@@ -242,7 +243,7 @@ export default function ManageEvent() {
             <p>
               {event.has_password
                 ? "Changing it removes previous scoring access."
-                : "Set a password so signed-in people can enter scores."}
+                : "Set a password so signed-in people can view the event and enter scores."}
             </p>
           </div>
         </div>

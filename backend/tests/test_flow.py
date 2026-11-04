@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from fastapi import Response
 
 file = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
 file.close()
@@ -54,6 +55,48 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(main.submit_result(fixture.id, result, self.db, scorer), {'ok': True})
         self.assertEqual(fixture.submitted_by, scorer.id)
         self.assertEqual(len(self.db.query(main.Participant).filter_by(event_id=event_id).all()), 2)
+
+    def test_event_details_require_sign_in_and_password(self):
+        coach = self.players[2]
+        coach.role = 'coach'
+        self.db.commit()
+        created = main.create_event(main.EventIn(name='Private event', best_of=5, event_password='clubsecret'), self.db, coach)
+        event_id = created['id']
+        member = self.players[0]
+        with self.assertRaises(main.HTTPException) as anonymous:
+            main.event_detail(event_id, self.db, None)
+        self.assertEqual(anonymous.exception.status_code, 401)
+        with self.assertRaises(main.HTTPException) as locked:
+            main.event_detail(event_id, self.db, member)
+        self.assertEqual(locked.exception.status_code, 403)
+        self.assertEqual(main.events(self.db, None)[0], {'id': event_id, 'name': 'Private event'})
+        self.assertIn('matches', main.event_detail(event_id, self.db, coach))
+        main.join_event(event_id, main.EventPasswordIn(password='clubsecret'), self.db, member)
+        self.assertIn('matches', main.event_detail(event_id, self.db, member))
+        main.set_event_password(event_id, main.EventPasswordIn(password='newsecret'), self.db, coach)
+        with self.assertRaises(main.HTTPException) as revoked:
+            main.event_detail(event_id, self.db, member)
+        self.assertEqual(revoked.exception.status_code, 403)
+
+    def test_email_edit_and_account_deletion_preserve_results_anonymously(self):
+        player = self.players[0]
+        player.password_hash = main.hash_password('old-password')
+        self.db.add(main.Participant(event_id=self.event.id, user_id=player.id))
+        self.db.commit()
+        main.save_result(self.db, self.match, main.ResultIn(sets=[(11, 2), (11, 3), (11, 4)]), player, 'before_submission')
+        with self.assertRaises(main.HTTPException) as wrong:
+            main.update_email(main.EmailIn(email='new@example.com', password='wrong'), self.db, player)
+        self.assertEqual(wrong.exception.status_code, 403)
+        self.assertEqual(main.update_email(main.EmailIn(email='new@example.com', password='old-password'), self.db, player)['email'], 'new@example.com')
+        old_id = player.id
+        self.assertEqual(main.delete_account(main.DeleteAccountIn(password='old-password'), Response(), self.db, player), {'ok': True})
+        self.assertIsNone(self.db.get(main.User, old_id))
+        former_id = self.db.query(main.Participant).filter_by(event_id=self.event.id).one().user_id
+        former = self.db.get(main.User, former_id)
+        self.assertEqual(former.role, 'guest')
+        self.assertEqual(self.db.get(main.Match, self.match.id).winner_id, former_id)
+        self.assertEqual(self.db.get(main.Match, self.match.id).submitted_by, former_id)
+        self.assertEqual(self.db.query(main.Audit).filter_by(actor_id=former_id).count(), 2)
 
     def test_random_round_robin_covers_pairs_without_round_conflicts(self):
         for count in (2, 3, 4, 5, 6):

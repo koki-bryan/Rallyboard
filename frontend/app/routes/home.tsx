@@ -31,7 +31,7 @@ export default function Home() {
                 <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-blue-soft text-[21px] text-blue">✦</span>
                 <strong>{item.name}</strong>
                 <span>
-                  Best of {item.best_of} · {item.status}
+                  {item.best_of ? `Best of ${item.best_of} · ${item.status}` : "Password required"}
                 </span>
                 <b>↗</b>
               </Link>

@@ -1,4 +1,4 @@
-# Table Tennis Rankings
+# Rallyboard
 
 React Router + Tailwind frontend, FastAPI backend, and local PostgreSQL database for round robin table tennis events.
 
