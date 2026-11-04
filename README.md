@@ -2,7 +2,7 @@
 
 React Router + Tailwind frontend, FastAPI backend, and local PostgreSQL database for round robin table tennis events.
 
-For Vercel and Render Free deployment, see [DEPLOYMENT.md](DEPLOYMENT.md).
+For the live Vercel Hobby deployment with Neon Free Postgres, see [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Local setup
 

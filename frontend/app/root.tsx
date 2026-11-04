@@ -8,6 +8,7 @@ import {
 } from "react-router";
 
 import type { Route } from "./+types/root";
+import { MotionConfig } from "motion/react";
 import "./app.css";
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -31,7 +32,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-  return <Outlet />;
+  return <MotionConfig reducedMotion="user"><Outlet /></MotionConfig>;
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import {
   Link,
   Outlet,
@@ -160,18 +161,28 @@ export default function AppLayout() {
               </Link>
             </div>
           )}
-          <Outlet
-            context={
-              {
-                user,
-                setUser,
-                authReady,
-                events,
-                refreshEvents,
-                openAuth: () => setShowAuth(true),
-              } satisfies AppContext
-            }
-          />
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={location.pathname}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <Outlet
+                context={
+                  {
+                    user,
+                    setUser,
+                    authReady,
+                    events,
+                    refreshEvents,
+                    openAuth: () => setShowAuth(true),
+                  } satisfies AppContext
+                }
+              />
+            </motion.div>
+          </AnimatePresence>
         </div>
       </main>
       {showAuth && !user && (

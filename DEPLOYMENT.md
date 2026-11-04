@@ -1,53 +1,38 @@
-# Deploy Rallyboard on Vercel and Render
+# Deploy Rallyboard on Vercel Hobby
 
-This setup uses Vercel Hobby for the static frontend and a Render Free web service plus Render Free Postgres for the API. The browser calls `/api` on the Vercel domain; Vercel forwards those requests to Render. This keeps sign-in cookies on the frontend domain.
+Rallyboard is live as two Vercel projects on the Hobby plan:
 
-## Before deploying
+- Frontend: <https://rallyboard-web.vercel.app> (`frontend/`)
+- FastAPI backend: <https://rallyboard-api.vercel.app> (`backend/`)
+- Database: Neon Free Postgres, provisioned through the Vercel Marketplace and connected to `rallyboard-api`
 
-Push this repository to GitHub or GitLab. Do not commit `backend/.env` or any database password. The local PostgreSQL password is unrelated to the hosted database; Render creates a new password and connects the API through `DATABASE_URL`.
+The frontend serves a React Router SPA. Its `/api/*` rewrite forwards requests to the API project so browser sign-in uses a cookie on the frontend domain. `frontend/vercel.json` holds that rewrite. The backend uses Vercel's FastAPI preset and the `main:app` entrypoint declared in `backend/pyproject.toml`.
 
-The hosted database starts empty. This guide creates a new admin account; it does not copy your local events or scores.
+## Redeploy after local changes
 
-## 1. Create the Vercel project
+The two Vercel projects are linked to their local directories. Deploy each changed part from this checkout:
 
-1. Import the repository into Vercel and select the **Hobby** plan. Set the **Root Directory** to `frontend`.
-2. The included `frontend/vercel.json` runs `npm run build`, publishes `build/client`, and rewrites `/api/*` to `https://rallyboard-api.onrender.com/api/*`. Leave `VITE_API_URL` unset so the production build calls the same-origin `/api/v1` path.
-3. Deploy and copy the production URL, such as `https://your-project.vercel.app`. The API will not respond until Render is running.
+```sh
+cd backend && vercel deploy --prod
+cd ../frontend && vercel deploy --prod
+```
 
-If your Render service's actual URL differs from `https://rallyboard-api.onrender.com`, replace that hostname in `frontend/vercel.json` and redeploy Vercel. Keep the `/api/:path*` portion intact. The API rewrite must remain before the SPA fallback rewrite.
+These are CLI deployments. Neither project is connected to Git for automatic deployments, so pushing to GitHub alone will not update the live site. The `.vercel/` link files and `.env.local` files are local and ignored by Git; on another machine, run `vercel link` in each directory and select `rallyboard-api` or `rallyboard-web` respectively.
 
-## 2. Create Render services
+## Production environment
 
-1. In Render, create a **Blueprint** from the same repository. It reads `render.yaml` at the repository root and creates a Free Python web service and a Free PostgreSQL database.
-2. Enter these environment values when prompted:
+The API project has `DATABASE_URL` from its Neon integration, `COOKIE_SECURE=true`, and `FRONTEND_ORIGIN=https://rallyboard-web.vercel.app` in its **Production** environment. Keep `VITE_API_URL` unset on the frontend so requests use the same-origin proxy.
 
-   | Variable | Value |
-   | --- | --- |
-   | `FRONTEND_ORIGIN` | The exact production Vercel origin, for example `https://your-project.vercel.app` (no trailing slash). |
-   | `BOOTSTRAP_ADMIN_NAME` | Name of the first coach/admin. |
-   | `BOOTSTRAP_ADMIN_EMAIL` | Email for the first admin account. |
-   | `BOOTSTRAP_ADMIN_PASSWORD` | A unique account password with at least 8 characters. |
+The first admin was created with the Vercel account email. The one-time `BOOTSTRAP_ADMIN_*` environment variables were removed after creation. To create an admin for a fresh database, set `BOOTSTRAP_ADMIN_NAME`, `BOOTSTRAP_ADMIN_EMAIL`, and `BOOTSTRAP_ADMIN_PASSWORD` (at least eight characters) on the API project, deploy, verify sign-in, then remove those variables and redeploy. Do not put passwords in the repository.
 
-   The Blueprint supplies `DATABASE_URL` from Render Postgres and sets `COOKIE_SECURE=true`. Do not put any of these secrets in `render.yaml`.
-3. Deploy. Render installs the locked Python dependencies and starts `uvicorn` on its assigned port. The API creates its tables and first admin on startup. Open `https://rallyboard-api.onrender.com/docs` to confirm it is live. If your service URL differs, update the Vercel rewrite as described above.
-4. After the first admin is created, remove `BOOTSTRAP_ADMIN_PASSWORD` from the Render service's Environment settings. It is only needed for the initial bootstrap. Sign in from the Vercel site with the admin email and password you chose.
+The hosted database started empty; local events and scores were not copied. `render.yaml` remains in the repository as an unused alternative deployment configuration.
 
-## 3. Check the complete flow
+## Check the live app
 
-1. Open the Vercel site and sign in as the admin. Refresh the page; you should still be signed in.
-2. Create an event, add players, and generate its schedule.
-3. Create a second account. Open the event and enter its event password. Verify that scores and standings become visible.
+1. Open <https://rallyboard-web.vercel.app> and sign in.
+2. Confirm a refresh keeps you signed in, then create an event and generate its schedule.
+3. Check <https://rallyboard-web.vercel.app/api/v1/events> for an API response and <https://rallyboard-api.vercel.app/docs> for API documentation.
 
-If sign-in fails, check that `FRONTEND_ORIGIN` matches the Vercel production URL exactly, `COOKIE_SECURE` is `true`, and `frontend/vercel.json` points to the live Render API. Vercel preview domains are different origins; this setup authorizes the production URL only.
+## Free-tier limits
 
-## Free-plan limits
-
-Render Free web services spin down after 15 minutes without traffic, so the first API request after inactivity can take about a minute. Render Free Postgres **expires after 30 days**, has a 1 GB limit, and has no managed backups. Export your data before expiry or move the database to a longer-lived plan/provider if you want to keep rankings beyond that period. Vercel Hobby is intended for personal, non-commercial use. See [Render Free limits](https://render.com/docs/free) and [Vercel Hobby limits](https://vercel.com/docs/plans/hobby).
-
-## Source documentation
-
-- [React Router SPA mode](https://reactrouter.com/how-to/spa)
-- [Vercel SPA rewrites](https://vercel.com/docs/frameworks/frontend/vite)
-- [Vercel external rewrites](https://vercel.com/docs/routing/rewrites)
-- [Render Blueprints](https://render.com/docs/infrastructure-as-code)
-- [Render FastAPI deployment](https://render.com/docs/deploy-fastapi)
+Vercel Hobby is for personal, non-commercial use and has monthly Function and build limits. Neon Free has its own compute and storage limits. A separate Postgres service remains necessary because Vercel Functions do not provide persistent relational storage. See [Vercel Hobby limits](https://vercel.com/docs/plans/hobby), [Neon pricing](https://neon.com/pricing), and [Vercel Marketplace storage](https://vercel.com/docs/marketplace-storage).

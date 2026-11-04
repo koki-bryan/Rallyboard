@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
+import { motion } from "motion/react";
 import { MatchList } from "~/components/MatchList";
 import { DeleteEventDialog } from "~/components/DeleteEventDialog";
 import { PlayerSearch } from "~/components/PlayerSearch";
@@ -170,10 +171,11 @@ export default function EventPage() {
             <span>/{event.matches.length}</span>
           </div>
           <div className="mt-2 h-[5px] overflow-hidden rounded-full bg-blue/20 [&>div]:h-full [&>div]:rounded-full [&>div]:bg-blue">
-            <div
-              style={{
-                width: `${event.matches.length ? (played / event.matches.length) * 100 : 0}%`,
-              }}
+            <motion.div
+              className="w-full origin-left"
+              initial={{ scaleX: 0 }}
+              animate={{ scaleX: event.matches.length ? played / event.matches.length : 0 }}
+              transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
             />
           </div>
           <p>{event.matches.length - played} matches remaining</p>

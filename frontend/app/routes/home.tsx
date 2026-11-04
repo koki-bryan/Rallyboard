@@ -1,6 +1,9 @@
 import { Link } from "react-router";
+import { motion } from "motion/react";
 import { useApp } from "./app-layout";
 import { isCoach } from "~/lib/types";
+
+const MotionLink = motion.create(Link);
 export default function Home() {
   const { events, user, openAuth } = useApp();
   return (
@@ -17,7 +20,7 @@ export default function Home() {
         </div>
       </div>
       {events.length ? (
-        <section className="overflow-hidden rounded-xl border border-line bg-white p-6">
+        <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }} className="overflow-hidden rounded-xl border border-line bg-white p-6">
           <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-end [&_h2]:my-1 [&_h2]:text-[22px] [&_h2]:font-bold [&_h2]:tracking-tight [&_p]:text-[13px] [&_p]:text-muted">
             <div>
               <div className="text-[10px] font-bold tracking-[2px] text-blue">EVENTS</div>
@@ -26,18 +29,18 @@ export default function Home() {
             </div>
           </div>
           <div className="grid gap-2.5 [&>a]:flex [&>a]:flex-wrap [&>a]:items-center [&>a]:gap-3 [&>a]:rounded-lg [&>a]:border [&>a]:border-line [&>a]:p-3 [&>a]:text-ink [&>a]:no-underline [&>a:hover]:bg-surface [&_strong]:flex-1 [&_strong]:text-sm [&_b]:text-blue">
-            {events.map((item) => (
-              <Link key={item.id} to={`/events/${item.id}`}>
+            {events.map((item, index) => (
+              <MotionLink key={item.id} to={`/events/${item.id}`} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} whileHover={{ x: 3 }} whileTap={{ scale: 0.99 }} transition={{ duration: 0.22, delay: Math.min(index * 0.045, 0.27), ease: "easeOut" }}>
                 <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-blue-soft text-[21px] text-blue">✦</span>
                 <strong>{item.name}</strong>
                 <span>
                   {item.best_of ? `Best of ${item.best_of} · ${item.status}` : "Password required"}
                 </span>
                 <b>↗</b>
-              </Link>
+              </MotionLink>
             ))}
           </div>
-        </section>
+        </motion.section>
       ) : (
         <div className="flex min-h-[380px] flex-col items-center justify-center rounded-xl bg-blue-soft p-6 text-center [&_h2]:my-2 [&_h2]:text-[31px] [&_h2]:font-bold [&_h2]:tracking-tight [&_p]:mb-[22px] [&_p]:max-w-[410px] [&_p]:text-[13px] [&_p]:leading-relaxed [&_p]:text-muted">
           <div className="text-[50px] text-yellow">✦</div>
