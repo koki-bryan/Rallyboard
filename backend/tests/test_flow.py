@@ -1,12 +1,22 @@
 import os
 import tempfile
 import unittest
+import uuid
+from unittest.mock import patch
 from fastapi import Response
+from sqlalchemy import create_engine, inspect, text
 
 file = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
 file.close()
 os.environ['DATABASE_URL'] = 'sqlite:///' + file.name
 import main
+from sqlalchemy import event as sqlalchemy_event
+
+@sqlalchemy_event.listens_for(main.engine, 'connect')
+def enforce_foreign_keys(connection, _):
+    connection.execute('PRAGMA foreign_keys=ON')
+
+main.engine.dispose()
 
 class FlowTests(unittest.TestCase):
     @classmethod
@@ -30,6 +40,9 @@ class FlowTests(unittest.TestCase):
 
     def tearDown(self): self.db.close()
 
+    def event_row(self, public_id):
+        return self.db.query(main.Event).filter_by(public_id=str(public_id)).one()
+
     def test_event_password_unlocks_score_entry_for_non_player(self):
         scorer = main.User(name='Scorekeeper', email='score@example.com', password_hash='test')
         self.db.add(scorer)
@@ -39,11 +52,13 @@ class FlowTests(unittest.TestCase):
         created = main.create_event(main.EventIn(name='New event', best_of=5, event_password='clubsecret'),
             self.db, self.players[2])
         event_id = created['id']
-        self.assertEqual(self.db.query(main.Match).filter_by(event_id=event_id).count(), 0)
+        self.assertEqual(str(uuid.UUID(event_id)), event_id)
+        self.assertNotEqual(str(self.event_row(event_id).id), event_id)
+        self.assertEqual(self.db.query(main.Match).filter_by(event_id=self.event_row(event_id).id).count(), 0)
         main.add_player(event_id, main.AddPlayerIn(name='Floyd'), self.db, self.players[2])
         main.add_player(event_id, main.AddPlayerIn(name='Sean'), self.db, self.players[2])
         self.assertEqual(main.generate_schedule(event_id, self.db, self.players[2]), {'matches': 1})
-        fixture = self.db.query(main.Match).filter_by(event_id=event_id).one()
+        fixture = self.db.query(main.Match).filter_by(event_id=self.event_row(event_id).id).one()
         result = main.ResultIn(sets=[(11, 2), (11, 3), (11, 4)])
         with self.assertRaises(main.HTTPException) as denied:
             main.submit_result(fixture.id, result, self.db, scorer)
@@ -54,7 +69,7 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(main.join_event(event_id, main.EventPasswordIn(password='clubsecret'), self.db, scorer), {'can_score': True})
         self.assertEqual(main.submit_result(fixture.id, result, self.db, scorer), {'ok': True})
         self.assertEqual(fixture.submitted_by, scorer.id)
-        self.assertEqual(len(self.db.query(main.Participant).filter_by(event_id=event_id).all()), 2)
+        self.assertEqual(len(self.db.query(main.Participant).filter_by(event_id=self.event_row(event_id).id).all()), 2)
 
     def test_event_details_require_sign_in_and_password(self):
         coach = self.players[2]
@@ -164,11 +179,12 @@ class FlowTests(unittest.TestCase):
         a = main.add_player(event_id, main.AddPlayerIn(name='Guest A'), self.db, coach)
         main.add_player(event_id, main.AddPlayerIn(name='Guest B'), self.db, coach)
         main.generate_schedule(event_id, self.db, coach)
-        fixture = self.db.query(main.Match).filter_by(event_id=event_id).one()
+        numeric_id = self.event_row(event_id).id
+        fixture = self.db.query(main.Match).filter_by(event_id=numeric_id).one()
         main.save_result(self.db, fixture, main.ResultIn(sets=[(11, 3), (11, 4), (11, 5)]), coach, 'before_submission')
         self.assertEqual(main.delete_event(event_id, self.db, coach), {'ok': True})
-        self.assertIsNone(self.db.get(main.Event, event_id))
-        self.assertEqual(self.db.query(main.Match).filter_by(event_id=event_id).count(), 0)
+        self.assertIsNone(self.db.get(main.Event, numeric_id))
+        self.assertEqual(self.db.query(main.Match).filter_by(event_id=numeric_id).count(), 0)
         self.assertIsNone(self.db.get(main.User, a['id']))
 
     def test_score_validation_and_standings(self):
@@ -196,5 +212,55 @@ class FlowTests(unittest.TestCase):
         ):
             with self.subTest(scores=scores), self.assertRaises(main.HTTPException):
                 main.validate_result(main.ResultIn(sets=scores), self.match, 5)
+
+    def test_startup_bootstraps_first_admin_once(self):
+        settings = {
+            'BOOTSTRAP_ADMIN_NAME': 'First Coach',
+            'BOOTSTRAP_ADMIN_EMAIL': 'first-coach@example.com',
+            'BOOTSTRAP_ADMIN_PASSWORD': 'strong-password',
+        }
+        with patch.dict(os.environ, settings):
+            main.initialize()
+            main.initialize()
+        admins = self.db.query(main.User).filter_by(role='admin').all()
+        self.assertEqual(len(admins), 1)
+        self.assertEqual(admins[0].email, 'first-coach@example.com')
+        self.assertTrue(main.verify_password('strong-password', admins[0].password_hash))
+
+    def test_migration_assigns_uuid_to_existing_events_without_changing_numeric_ids(self):
+        with tempfile.TemporaryDirectory() as directory:
+            legacy_engine = create_engine('sqlite:///' + directory + '/legacy.db')
+            with legacy_engine.begin() as connection:
+                connection.execute(text('CREATE TABLE events (id INTEGER PRIMARY KEY, name VARCHAR(120))'))
+                connection.execute(text("INSERT INTO events (id, name) VALUES (7, 'Older event'), (42, 'Another event')"))
+            with patch.object(main, 'engine', legacy_engine):
+                main.migrate_event_public_ids()
+                main.migrate_event_public_ids()
+            with legacy_engine.connect() as connection:
+                rows = connection.execute(text('SELECT id, public_id FROM events ORDER BY id')).all()
+                self.assertEqual([row.id for row in rows], [7, 42])
+                self.assertEqual(len({row.public_id for row in rows}), 2)
+                self.assertTrue(all(str(uuid.UUID(row.public_id)) == row.public_id for row in rows))
+                self.assertIn('ix_events_public_id', {index['name'] for index in inspect(connection).get_indexes('events')})
+            legacy_engine.dispose()
+
+    def test_deleting_event_keeps_anonymous_scorer_used_elsewhere(self):
+        coach = self.players[2]
+        coach.role = 'coach'
+        player = self.players[0]
+        player.password_hash = main.hash_password('old-password')
+        self.db.add(main.Participant(event_id=self.event.id, user_id=player.id))
+        self.db.commit()
+        other = main.create_event(main.EventIn(name='Other', best_of=5, event_password='clubsecret'), self.db, coach)
+        main.add_player(other['id'], main.AddPlayerIn(name='Guest One'), self.db, coach)
+        main.add_player(other['id'], main.AddPlayerIn(name='Guest Two'), self.db, coach)
+        main.generate_schedule(other['id'], self.db, coach)
+        fixture = self.db.query(main.Match).filter_by(event_id=self.event_row(other['id']).id).one()
+        main.save_result(self.db, fixture, main.ResultIn(sets=[(11, 2), (11, 3), (11, 4)]), player, 'before_submission')
+        main.delete_account(main.DeleteAccountIn(password='old-password'), Response(), self.db, player)
+        former_id = self.db.query(main.Participant).filter_by(event_id=self.event.id).one().user_id
+        self.assertEqual(main.delete_event(self.event.public_id, self.db, coach), {'ok': True})
+        self.assertIsNotNone(self.db.get(main.User, former_id))
+        self.assertEqual(self.db.query(main.Audit).filter_by(actor_id=former_id).count(), 2)
 
 if __name__ == '__main__': unittest.main()

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { MatchList } from "~/components/MatchList";
+import { DeleteEventDialog } from "~/components/DeleteEventDialog";
 import { PlayerSearch } from "~/components/PlayerSearch";
 import { ScoreDialog } from "~/components/ScoreDialog";
 import { Standings } from "~/components/Standings";
@@ -19,6 +20,7 @@ export default function EventPage() {
   const [playerSearch, setPlayerSearch] = useState("");
   const [editing, setEditing] = useState<Match | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
   const [accessDenied, setAccessDenied] = useState(false);
   const refresh = useCallback(async () => {
     if (!eventId) return;
@@ -57,7 +59,7 @@ export default function EventPage() {
   if (authReady && (!user || accessDenied))
     return (
       <section className="mx-auto flex min-h-[420px] max-w-[560px] flex-col justify-center rounded-xl border border-line bg-white p-7 md:p-10">
-        <div className="mb-3 text-[10px] font-extrabold tracking-[2px] text-blue">EVENT ACCESS</div>
+        <div className="mb-3 text-[10px] font-bold tracking-[2px] text-blue">EVENT ACCESS</div>
         <h1 className="mb-2 text-[30px] font-bold tracking-tight text-ink">{user ? "Enter the event password" : "Sign in to view this event"}</h1>
         <p className="mb-6 text-sm leading-relaxed text-muted">{user ? "The password unlocks standings, match results, and score entry." : "Sign in or create an account, then enter the event password to see standings and matches."}</p>
         {error && <p role="alert" className="mb-4 rounded-lg bg-red-soft p-3 text-sm text-red">{error}</p>}
@@ -71,26 +73,6 @@ export default function EventPage() {
         )}
       </section>
     );
-  async function removeEvent() {
-    if (
-      !event ||
-      !window.confirm(
-        `Delete ${event.name}? This permanently removes its roster, matches, scores, and history.`,
-      )
-    )
-      return;
-    setError("");
-    setBusy(true);
-    try {
-      await api(`/events/${event.id}`, { method: "DELETE" });
-      await refreshEvents();
-      navigate("/");
-    } catch (cause) {
-      setError((cause as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
   if (!event)
     return (
       <div className="flex min-h-[380px] flex-col items-center justify-center rounded-xl bg-blue-soft p-6 text-center [&_h2]:my-2 [&_h2]:text-[31px] [&_h2]:font-bold [&_h2]:tracking-tight [&_p]:mb-[22px] [&_p]:max-w-[410px] [&_p]:text-[13px] [&_p]:leading-relaxed [&_p]:text-muted">
@@ -104,9 +86,9 @@ export default function EventPage() {
   const leader = played ? event.standings[0] : null;
   return (
     <>
-      <div className="mb-6 md:mb-[30px] flex flex-col items-start justify-between gap-5 md:flex-row md:items-end [&_h1]:my-2.5 [&_h1]:text-[34px] md:[&_h1]:text-[42px] [&_h1]:font-bold [&_h1]:leading-tight [&_h1]:tracking-[-1.5px] [&_h1_em]:font-serif [&_h1_em]:font-normal [&_h1_em]:text-blue [&_p]:text-[13px] [&_p]:text-muted">
+      <div className="mb-6 md:mb-[30px] flex flex-col items-start justify-between gap-5 md:flex-row md:items-end [&_h1]:my-2.5 [&_h1]:text-[34px] md:[&_h1]:text-[42px] [&_h1]:font-bold [&_h1]:leading-tight [&_h1]:tracking-[-1.5px] [&_h1_em]:font-sans [&_h1_em]:font-medium [&_h1_em]:text-blue [&_p]:text-[13px] [&_p]:text-muted">
         <div>
-          <div className="flex items-center gap-2 text-[10px] font-extrabold tracking-[2px] text-blue">
+          <div className="flex items-center gap-2 text-[10px] font-bold tracking-[2px] text-blue">
             <span className="h-0.5 w-[21px] bg-blue" /> CLUB COMPETITION
           </div>
           <h1>
@@ -117,7 +99,7 @@ export default function EventPage() {
         <div className="flex w-full flex-wrap gap-2 md:w-auto">
           {coach && (
             <Link
-              className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-extrabold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 border-line bg-white text-blue hover:bg-blue-soft"
+              className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-bold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 border-line bg-white text-blue hover:bg-blue-soft"
               to={`/manage/events/${event.id}`}
             >
               Manage event
@@ -125,15 +107,14 @@ export default function EventPage() {
           )}
           {coach && (
             <button
-              className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-extrabold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 bg-red text-white"
-              disabled={busy}
-              onClick={removeEvent}
+              className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-bold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 bg-red text-white"
+              onClick={() => setShowDelete(true)}
             >
               Delete event
             </button>
           )}
           {event.can_score && event.status !== "draft" && (
-            <a className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-extrabold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 bg-blue text-white" href="#matches">
+            <a className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-bold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 bg-blue text-white" href="#matches">
               Record a match ↗
             </a>
           )}
@@ -145,7 +126,7 @@ export default function EventPage() {
           <button onClick={() => setError("")}>×</button>
         </div>
       )}
-      <div className="mb-[18px] flex flex-wrap items-center gap-3.5 rounded-xl border border-line bg-white px-5 py-3 md:flex-nowrap [&>div:nth-child(2)]:flex [&>div:nth-child(2)]:flex-col [&>div:nth-child(2)]:gap-0.5 [&>div:nth-child(2)>span]:text-[9px] [&>div:nth-child(2)>span]:font-extrabold [&>div:nth-child(2)>span]:tracking-wider [&>div:nth-child(2)>span]:text-muted [&_strong]:text-[13px]">
+      <div className="mb-[18px] flex flex-wrap items-center gap-3.5 rounded-xl border border-line bg-white px-5 py-3 md:flex-nowrap [&>div:nth-child(2)]:flex [&>div:nth-child(2)]:flex-col [&>div:nth-child(2)]:gap-0.5 [&>div:nth-child(2)>span]:text-[9px] [&>div:nth-child(2)>span]:font-bold [&>div:nth-child(2)>span]:tracking-wider [&>div:nth-child(2)>span]:text-muted [&_strong]:text-[13px]">
         <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-blue-soft text-[21px] text-blue">✦</div>
         <div>
           <span>NOW VIEWING</span>
@@ -167,7 +148,7 @@ export default function EventPage() {
         </div>
       </div>
       {event.status === "draft" && (
-        <div className="mb-[18px] flex flex-wrap items-center gap-3 rounded-lg border border-yellow/25 bg-yellow-soft px-[18px] py-3 text-xs text-ink [&_strong]:text-[13px] [&_span]:min-w-[220px] [&_span]:flex-1 [&_a]:font-extrabold [&_a]:text-yellow-ink">
+        <div className="mb-[18px] flex flex-wrap items-center gap-3 rounded-lg border border-yellow/25 bg-yellow-soft px-[18px] py-3 text-xs text-ink [&_strong]:text-[13px] [&_span]:min-w-[220px] [&_span]:flex-1 [&_a]:font-bold [&_a]:text-yellow-ink">
           <strong>Roster in progress</strong>
           <span>
             {event.players.length} player{event.players.length === 1 ? "" : "s"}{" "}
@@ -180,11 +161,11 @@ export default function EventPage() {
       )}
       <div className="mb-[27px] grid grid-cols-2 gap-2.5 lg:grid-cols-3 lg:gap-4 [&>div:last-child]:col-span-2 lg:[&>div:last-child]:col-span-1">
         <div className="min-h-[145px] overflow-hidden rounded-xl px-4 py-4 lg:min-h-[176px] lg:px-[22px] lg:py-[18px] [&_p]:mt-2 [&_p]:text-[11px] [&_p]:text-muted bg-blue-soft">
-          <div className="flex items-center justify-between text-[10px] font-extrabold tracking-[1.5px] text-blue">
+          <div className="flex items-center justify-between text-[10px] font-bold tracking-[1.5px] text-blue">
             <span>01 / MATCHES PLAYED</span>
             <span className="text-[17px] font-normal">↗</span>
           </div>
-          <div className="mt-4 text-[34px] lg:text-[43px] font-extrabold leading-tight tracking-[-2px] [&_span]:text-2xl [&_span]:text-muted">
+          <div className="mt-4 text-[34px] lg:text-[43px] font-bold leading-tight tracking-[-2px] [&_span]:text-2xl [&_span]:text-muted">
             {played}
             <span>/{event.matches.length}</span>
           </div>
@@ -198,11 +179,11 @@ export default function EventPage() {
           <p>{event.matches.length - played} matches remaining</p>
         </div>
         <div className="min-h-[145px] overflow-hidden rounded-xl px-4 py-4 lg:min-h-[176px] lg:px-[22px] lg:py-[18px] [&_p]:mt-2 [&_p]:text-[11px] [&_p]:text-muted bg-yellow-soft">
-          <div className="flex items-center justify-between text-[10px] font-extrabold tracking-[1.5px] text-yellow-ink">
+          <div className="flex items-center justify-between text-[10px] font-bold tracking-[1.5px] text-yellow-ink">
             <span>02 / CURRENT LEADER</span>
             <span className="text-[17px] font-normal">★</span>
           </div>
-          <div className="mt-4 text-[34px] lg:text-[43px] font-extrabold leading-tight tracking-[-2px] [&_span]:text-2xl [&_span]:text-muted truncate text-[23px] lg:text-[35px]">{leader?.name || "—"}</div>
+          <div className="mt-4 text-[34px] lg:text-[43px] font-bold leading-tight tracking-[-2px] [&_span]:text-2xl [&_span]:text-muted truncate text-[23px] lg:text-[35px]">{leader?.name || "—"}</div>
           <p>
             {leader
               ? `${leader.wins}–${leader.losses} record · ${leader.set_difference >= 0 ? "+" : ""}${leader.set_difference} set difference`
@@ -210,11 +191,11 @@ export default function EventPage() {
           </p>
         </div>
         <div className="min-h-[145px] overflow-hidden rounded-xl px-4 py-4 lg:min-h-[176px] lg:px-[22px] lg:py-[18px] [&_p]:mt-2 [&_p]:text-[11px] [&_p]:text-muted border border-line bg-white">
-          <div className="flex items-center justify-between text-[10px] font-extrabold tracking-[1.5px] text-blue">
+          <div className="flex items-center justify-between text-[10px] font-bold tracking-[1.5px] text-blue">
             <span>03 / TOTAL POINTS</span>
             <span className="text-[17px] font-normal">✳</span>
           </div>
-          <div className="mt-4 text-[34px] lg:text-[43px] font-extrabold leading-tight tracking-[-2px] [&_span]:text-2xl [&_span]:text-muted">
+          <div className="mt-4 text-[34px] lg:text-[43px] font-bold leading-tight tracking-[-2px] [&_span]:text-2xl [&_span]:text-muted">
             {event.standings.reduce((sum, row) => sum + row.points_won, 0)}
           </div>
           <p>Scored across all completed matches</p>
@@ -240,6 +221,13 @@ export default function EventPage() {
           bestOf={event.best_of}
           onClose={() => setEditing(null)}
           onSaved={refresh}
+        />
+      )}
+      {showDelete && (
+        <DeleteEventDialog
+          event={event}
+          onClose={() => setShowDelete(false)}
+          onDeleted={async () => { await refreshEvents(); navigate("/"); }}
         />
       )}
     </>

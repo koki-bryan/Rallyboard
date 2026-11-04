@@ -15,12 +15,16 @@ from dotenv import load_dotenv
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint, create_engine, delete, select, update
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint, create_engine, delete, inspect, select, text, update
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 
 load_dotenv(Path(__file__).with_name('.env'))
 
 DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql+psycopg://postgres:postgres@localhost:5432/rankings')
+if DATABASE_URL.startswith('postgres://'):
+    DATABASE_URL = 'postgresql+psycopg://' + DATABASE_URL[len('postgres://'):]
+elif DATABASE_URL.startswith('postgresql://'):
+    DATABASE_URL = 'postgresql+psycopg://' + DATABASE_URL[len('postgresql://'):]
 FRONTEND_ORIGIN = os.getenv('FRONTEND_ORIGIN', 'http://localhost:5173')
 COOKIE_SECURE = os.getenv('COOKIE_SECURE', 'false').lower() == 'true'
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
@@ -47,6 +51,7 @@ class LoginSession(Base):
 class Event(Base):
     __tablename__ = 'events'
     id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(String(36), unique=True, index=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String(120))
     best_of: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(20), default='active')
@@ -113,9 +118,38 @@ class Audit(Base):
 app = FastAPI(title='Rallyboard')
 app.add_middleware(CORSMiddleware, allow_origins=[FRONTEND_ORIGIN], allow_credentials=True, allow_methods=['*'], allow_headers=['*'])
 
+def migrate_event_public_ids():
+    """Add shareable UUIDs to databases created before events had public IDs."""
+    with engine.begin() as connection:
+        columns = {column['name'] for column in inspect(connection).get_columns('events')}
+        if 'public_id' not in columns:
+            connection.execute(text('ALTER TABLE events ADD COLUMN public_id VARCHAR(36)'))
+        for event_id in connection.execute(text('SELECT id FROM events WHERE public_id IS NULL')).scalars().all():
+            connection.execute(text('UPDATE events SET public_id = :public_id WHERE id = :id'),
+                               {'public_id': str(uuid.uuid4()), 'id': event_id})
+        indexes = {index['name'] for index in inspect(connection).get_indexes('events')}
+        if 'ix_events_public_id' not in indexes:
+            connection.execute(text('CREATE UNIQUE INDEX ix_events_public_id ON events (public_id)'))
+        if connection.dialect.name == 'postgresql':
+            connection.execute(text('ALTER TABLE events ALTER COLUMN public_id SET NOT NULL'))
+
 @app.on_event('startup')
 def initialize():
     Base.metadata.create_all(engine)
+    migrate_event_public_ids()
+    admin_email = os.getenv('BOOTSTRAP_ADMIN_EMAIL')
+    admin_password = os.getenv('BOOTSTRAP_ADMIN_PASSWORD')
+    if admin_email or admin_password:
+        if not admin_email or not admin_password or len(admin_password) < 8:
+            raise RuntimeError('Set BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD (at least 8 characters) together')
+        with SessionLocal() as db:
+            if not db.scalar(select(User.id).where(User.role == 'admin').limit(1)):
+                email = admin_email.strip().lower()
+                if db.scalar(select(User.id).where(User.email == email)):
+                    raise RuntimeError('Bootstrap admin email already belongs to a non-admin account')
+                db.add(User(name=os.getenv('BOOTSTRAP_ADMIN_NAME', 'Coach'), email=email,
+                            password_hash=hash_password(admin_password), role='admin'))
+                db.commit()
 
 def db_session(request: Request):
     if request.method not in ('GET', 'HEAD', 'OPTIONS'):
@@ -305,9 +339,16 @@ def change_role(user_id: int, data: RoleIn, db: Session = Depends(db_session), a
 @app.get('/api/v1/events')
 def events(db: Session = Depends(db_session), user: User | None = Depends(current_user)):
     memberships = set(db.scalars(select(EventMember.event_id).where(EventMember.user_id == user.id))) if user else set()
-    return [{'id': e.id, 'name': e.name, **({'best_of': e.best_of, 'status': e.status}
+    return [{'id': e.public_id, 'name': e.name, **({'best_of': e.best_of, 'status': e.status}
             if user and (user.role in ('coach', 'admin') or e.id in memberships) else {})}
             for e in db.scalars(select(Event).order_by(Event.id.desc()))]
+
+def public_event(db: Session, event_id: uuid.UUID | str, lock: bool = False) -> Event:
+    query = select(Event).where(Event.public_id == str(event_id))
+    event = db.scalar(query.with_for_update() if lock else query)
+    if not event:
+        raise HTTPException(404, 'Event not found')
+    return event
 
 @app.post('/api/v1/events')
 def create_event(data: EventIn, db: Session = Depends(db_session), coach: User = Depends(require_coach)):
@@ -324,13 +365,12 @@ def create_event(data: EventIn, db: Session = Depends(db_session), coach: User =
     for player_id in ids:
         db.add(Participant(event_id=event.id, user_id=player_id))
     db.commit()
-    return {'id': event.id}
+    return {'id': event.public_id}
 
 @app.delete('/api/v1/events/{event_id}')
-def delete_event(event_id: int, db: Session = Depends(db_session), _: User = Depends(require_coach)):
-    event = db.scalar(select(Event).where(Event.id == event_id).with_for_update())
-    if not event:
-        raise HTTPException(404, 'Event not found')
+def delete_event(event_id: uuid.UUID, db: Session = Depends(db_session), _: User = Depends(require_coach)):
+    event = public_event(db, event_id, lock=True)
+    event_id = event.id
     match_ids = db.scalars(select(Match.id).where(Match.event_id == event_id)).all()
     player_ids = db.scalars(select(Participant.user_id).where(Participant.event_id == event_id)).all()
     guest_ids = [user.id for user in db.scalars(select(User).where(User.id.in_(player_ids), User.role == 'guest'))]
@@ -345,16 +385,22 @@ def delete_event(event_id: int, db: Session = Depends(db_session), _: User = Dep
     db.delete(event)
     db.flush()
     for guest_id in guest_ids:
-        if not db.scalar(select(Participant.id).where(Participant.user_id == guest_id)):
+        still_referenced = any((
+            db.scalar(select(Participant.id).where(Participant.user_id == guest_id).limit(1)),
+            db.scalar(select(Event.id).where(Event.created_by == guest_id).limit(1)),
+            db.scalar(select(Match.id).where((Match.player1_id == guest_id) | (Match.player2_id == guest_id) |
+                                                   (Match.winner_id == guest_id) | (Match.submitted_by == guest_id)).limit(1)),
+            db.scalar(select(Audit.id).where(Audit.actor_id == guest_id).limit(1)),
+        ))
+        if not still_referenced:
             db.delete(db.get(User, guest_id))
     db.commit()
     return {'ok': True}
 
 @app.post('/api/v1/events/{event_id}/players')
-def add_player(event_id: int, data: AddPlayerIn, db: Session = Depends(db_session), _: User = Depends(require_coach)):
-    event = db.scalar(select(Event).where(Event.id == event_id).with_for_update())
-    if not event:
-        raise HTTPException(404, 'Event not found')
+def add_player(event_id: uuid.UUID, data: AddPlayerIn, db: Session = Depends(db_session), _: User = Depends(require_coach)):
+    event = public_event(db, event_id, lock=True)
+    event_id = event.id
     if event.status != 'draft':
         raise HTTPException(409, 'Roster is locked after schedule generation')
     if (data.name is None) == (data.user_id is None):
@@ -379,10 +425,9 @@ def add_player(event_id: int, data: AddPlayerIn, db: Session = Depends(db_sessio
     return {'id': player.id, 'name': player.name}
 
 @app.delete('/api/v1/events/{event_id}/players/{player_id}')
-def remove_player(event_id: int, player_id: int, db: Session = Depends(db_session), _: User = Depends(require_coach)):
-    event = db.scalar(select(Event).where(Event.id == event_id).with_for_update())
-    if not event:
-        raise HTTPException(404, 'Event not found')
+def remove_player(event_id: uuid.UUID, player_id: int, db: Session = Depends(db_session), _: User = Depends(require_coach)):
+    event = public_event(db, event_id, lock=True)
+    event_id = event.id
     if event.status != 'draft':
         raise HTTPException(409, 'Roster is locked after schedule generation')
     participant = db.scalar(select(Participant).where(Participant.event_id == event_id, Participant.user_id == player_id))
@@ -412,10 +457,9 @@ def round_robin_schedule(player_ids: list[int]) -> list[tuple[int, int, int]]:
     return pairs
 
 @app.post('/api/v1/events/{event_id}/generate-schedule')
-def generate_schedule(event_id: int, db: Session = Depends(db_session), _: User = Depends(require_coach)):
-    event = db.scalar(select(Event).where(Event.id == event_id).with_for_update())
-    if not event:
-        raise HTTPException(404, 'Event not found')
+def generate_schedule(event_id: uuid.UUID, db: Session = Depends(db_session), _: User = Depends(require_coach)):
+    event = public_event(db, event_id, lock=True)
+    event_id = event.id
     if event.status != 'draft':
         raise HTTPException(409, 'Schedule was already generated')
     ids = db.scalars(select(Participant.user_id).where(Participant.event_id == event_id)).all()
@@ -487,10 +531,9 @@ def standings(ids: list[int], names: dict[int, str], matches: list[Match]):
     return rows
 
 @app.get('/api/v1/events/{event_id}')
-def event_detail(event_id: int, db: Session = Depends(db_session), user: User | None = Depends(current_user)):
-    event = db.get(Event, event_id)
-    if not event:
-        raise HTTPException(404, 'Event not found')
+def event_detail(event_id: uuid.UUID, db: Session = Depends(db_session), user: User | None = Depends(current_user)):
+    event = public_event(db, event_id)
+    event_id = event.id
     if not user:
         raise HTTPException(401, 'Sign in to view this event')
     member = db.scalar(select(EventMember.id).where(EventMember.event_id == event_id, EventMember.user_id == user.id))
@@ -503,15 +546,14 @@ def event_detail(event_id: int, db: Session = Depends(db_session), user: User | 
     matches.sort(key=lambda m: (scheduled[m.id].sequence_number if m.id in scheduled else m.id))
     access = db.get(EventAccess, event_id)
     can_score = True
-    return {'id': event.id, 'name': event.name, 'best_of': event.best_of, 'status': event.status,
+    return {'id': event.public_id, 'name': event.name, 'best_of': event.best_of, 'status': event.status,
             'can_score': can_score, 'has_password': access is not None,
             'players': [{'id': i, 'name': names[i]} for i in ids],
             'standings': standings(ids, names, matches), 'matches': [match_data(m, names, scheduled.get(m.id)) for m in matches]}
 
 @app.post('/api/v1/events/{event_id}/join')
-def join_event(event_id: int, data: EventPasswordIn, db: Session = Depends(db_session), user: User = Depends(require_user)):
-    if not db.get(Event, event_id):
-        raise HTTPException(404, 'Event not found')
+def join_event(event_id: uuid.UUID, data: EventPasswordIn, db: Session = Depends(db_session), user: User = Depends(require_user)):
+    event_id = public_event(db, event_id).id
     access = db.get(EventAccess, event_id)
     if not access:
         raise HTTPException(409, 'Coach must set an event password first')
@@ -523,9 +565,8 @@ def join_event(event_id: int, data: EventPasswordIn, db: Session = Depends(db_se
     return {'can_score': True}
 
 @app.put('/api/v1/events/{event_id}/password')
-def set_event_password(event_id: int, data: EventPasswordIn, db: Session = Depends(db_session), _: User = Depends(require_coach)):
-    if not db.get(Event, event_id):
-        raise HTTPException(404, 'Event not found')
+def set_event_password(event_id: uuid.UUID, data: EventPasswordIn, db: Session = Depends(db_session), _: User = Depends(require_coach)):
+    event_id = public_event(db, event_id).id
     access = db.get(EventAccess, event_id)
     if access:
         access.password_hash = hash_password(data.password)
@@ -607,6 +648,7 @@ def bootstrap_admin():
     if len(sys.argv) != 5:
         raise SystemExit('Usage: python main.py bootstrap-admin NAME EMAIL PASSWORD')
     Base.metadata.create_all(engine)
+    migrate_event_public_ids()
     _, _, name, email, password = sys.argv
     if len(password) < 8: raise SystemExit('Password must have at least 8 characters')
     with SessionLocal() as db:

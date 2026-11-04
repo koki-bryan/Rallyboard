@@ -1,5 +1,6 @@
-const BASE_URL =
-  (import.meta.env.VITE_API_URL || "http://localhost:8000") + "/api/v1";
+const apiOrigin = import.meta.env.VITE_API_URL ??
+  (import.meta.env.PROD ? "" : "http://localhost:8000");
+const BASE_URL = apiOrigin.replace(/\/$/, "") + "/api/v1";
 
 export class ApiError extends Error {
   constructor(message: string, public status: number) {

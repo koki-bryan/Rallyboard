@@ -5,7 +5,7 @@ from sqlalchemy.exc import OperationalError
 import psycopg
 from psycopg import sql
 
-from main import Base, DATABASE_URL, engine
+from main import Base, DATABASE_URL, engine, migrate_event_public_ids
 
 
 def main() -> None:
@@ -21,6 +21,7 @@ def main() -> None:
             else:
                 print(f'Database {url.database} already exists')
         Base.metadata.create_all(engine)
+        migrate_event_public_ids()
         print('Application tables are ready')
     except (OperationalError, psycopg.OperationalError) as exc:
         raise SystemExit('Could not connect to local PostgreSQL. Check that it is running and that backend/.env has the correct credentials.') from exc

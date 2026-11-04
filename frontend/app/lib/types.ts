@@ -28,7 +28,7 @@ export type Match = {
   sets: number[][];
 };
 export type Event = {
-  id: number;
+  id: string;
   name: string;
   best_of: number;
   status: string;

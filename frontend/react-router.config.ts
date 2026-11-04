@@ -1,7 +1,6 @@
 import type { Config } from "@react-router/dev/config";
 
 export default {
-  // Config options...
-  // Server-side render by default, to enable SPA mode set this to `false`
-  ssr: true,
+  // The frontend fetches data in the browser; Vercel serves the built SPA.
+  ssr: false,
 } satisfies Config;

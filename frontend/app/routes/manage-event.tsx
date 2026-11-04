@@ -3,7 +3,17 @@ import { Link, useNavigate, useParams } from "react-router";
 import { api } from "~/lib/api";
 import { isCoach, type Event, type User } from "~/lib/types";
 import { PlayerAvatar } from "~/components/PlayerAvatar";
+import { DeleteEventDialog } from "~/components/DeleteEventDialog";
+import { ConfirmDialog } from "~/components/ConfirmDialog";
 import { useApp } from "./app-layout";
+
+type PendingAction = {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  tone: "danger" | "primary";
+  execute: () => Promise<void>;
+};
 
 export default function ManageEvent() {
   const { eventId } = useParams();
@@ -16,6 +26,10 @@ export default function ManageEvent() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [pendingBusy, setPendingBusy] = useState(false);
+  const [pendingError, setPendingError] = useState("");
   const refresh = useCallback(async () => {
     if (eventId) setEvent(await api<Event>(`/events/${eventId}`));
   }, [eventId]);
@@ -37,19 +51,22 @@ export default function ManageEvent() {
       setBusy(false);
     }
   }
-  async function removeEvent() {
-    if (
-      !event ||
-      !window.confirm(
-        `Delete ${event.name}? This permanently removes its roster, matches, scores, and history.`,
-      )
-    )
-      return;
-    await run(async () => {
-      await api(`/events/${event.id}`, { method: "DELETE" });
-      await refreshEvents();
-      navigate("/");
-    });
+  async function confirmPending() {
+    if (!pendingAction) return;
+    setPendingBusy(true);
+    setPendingError("");
+    try {
+      await pendingAction.execute();
+      setPendingAction(null);
+    } catch (cause) {
+      setPendingError((cause as Error).message);
+    } finally {
+      setPendingBusy(false);
+    }
+  }
+  function prepare(action: PendingAction) {
+    setPendingError("");
+    setPendingAction(action);
   }
   if (!authReady)
     return (
@@ -63,7 +80,7 @@ export default function ManageEvent() {
         <h2>Coach access required</h2>
         <p>Sign in as a coach or admin to manage an event.</p>
         {!user && (
-          <button className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-extrabold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 bg-blue text-white" onClick={openAuth}>
+          <button className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-bold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 bg-blue text-white" onClick={openAuth}>
             Sign in ↗
           </button>
         )}
@@ -79,9 +96,9 @@ export default function ManageEvent() {
   const draft = event.status === "draft";
   return (
     <>
-      <div className="mb-6 md:mb-[30px] flex flex-col items-start justify-between gap-5 md:flex-row md:items-end [&_h1]:my-2.5 [&_h1]:text-[34px] md:[&_h1]:text-[42px] [&_h1]:font-bold [&_h1]:leading-tight [&_h1]:tracking-[-1.5px] [&_h1_em]:font-serif [&_h1_em]:font-normal [&_h1_em]:text-blue [&_p]:text-[13px] [&_p]:text-muted">
+      <div className="mb-6 md:mb-[30px] flex flex-col items-start justify-between gap-5 md:flex-row md:items-end [&_h1]:my-2.5 [&_h1]:text-[34px] md:[&_h1]:text-[42px] [&_h1]:font-bold [&_h1]:leading-tight [&_h1]:tracking-[-1.5px] [&_h1_em]:font-sans [&_h1_em]:font-medium [&_h1_em]:text-blue [&_p]:text-[13px] [&_p]:text-muted">
         <div>
-          <div className="flex items-center gap-2 text-[10px] font-extrabold tracking-[2px] text-blue">
+          <div className="flex items-center gap-2 text-[10px] font-bold tracking-[2px] text-blue">
             <span className="h-0.5 w-[21px] bg-blue" /> COACH DESK
           </div>
           <h1>
@@ -93,7 +110,7 @@ export default function ManageEvent() {
               : "View the event and manage its score access."}
           </p>
         </div>
-        <Link className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-extrabold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 border-line bg-white text-blue hover:bg-blue-soft" to={`/events/${event.id}`}>
+        <Link className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-bold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 border-line bg-white text-blue hover:bg-blue-soft" to={`/events/${event.id}`}>
           View event ↗
         </Link>
       </div>
@@ -103,10 +120,10 @@ export default function ManageEvent() {
           <button onClick={() => setError("")}>×</button>
         </div>
       )}
-      <section className="overflow-hidden rounded-xl border border-line bg-white mt-[30px] p-6 [&_label]:block [&_label]:text-[11px] [&_label]:font-extrabold [&_label]:text-muted">
+      <section className="overflow-hidden rounded-xl border border-line bg-white mt-[30px] p-6 [&_label]:block [&_label]:text-[11px] [&_label]:font-bold [&_label]:text-muted">
         <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-end [&_h2]:my-1 [&_h2]:text-[22px] [&_h2]:font-bold [&_h2]:tracking-tight [&_p]:text-[13px] [&_p]:text-muted">
           <div>
-            <div className="text-[10px] font-extrabold tracking-[2px] text-blue">EVENT ROSTER</div>
+            <div className="text-[10px] font-bold tracking-[2px] text-blue">EVENT ROSTER</div>
             <h2>{event.players.length} players</h2>
             <p>
               {draft
@@ -122,16 +139,18 @@ export default function ManageEvent() {
               <strong>{player.name}</strong>
               {draft && (
                 <button
-                  className="whitespace-nowrap border-0 bg-transparent px-0.5 py-1 text-[11px] font-extrabold text-muted hover:underline"
+                  className="whitespace-nowrap border-0 bg-transparent px-0.5 py-1 text-[11px] font-bold text-muted hover:underline"
                   disabled={busy}
-                  onClick={() =>
-                    run(async () => {
-                      await api(`/events/${event.id}/players/${player.id}`, {
-                        method: "DELETE",
-                      });
+                  onClick={() => prepare({
+                    title: `Remove ${player.name}?`,
+                    description: `This removes ${player.name} from ${event.name}'s draft roster. You can add them again before generating matches.`,
+                    confirmLabel: "Remove player",
+                    tone: "danger",
+                    execute: async () => {
+                      await api(`/events/${event.id}/players/${player.id}`, { method: "DELETE" });
                       await refresh();
-                    })
-                  }
+                    },
+                  })}
                 >
                   Remove
                 </button>
@@ -166,7 +185,7 @@ export default function ManageEvent() {
                   onChange={(input) => setPlayerName(input.target.value)}
                 />
               </label>
-              <button className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-extrabold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 border-line bg-white text-blue hover:bg-blue-soft" disabled={busy}>
+              <button className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-bold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 border-line bg-white text-blue hover:bg-blue-soft" disabled={busy}>
                 Add player
               </button>
             </form>
@@ -207,24 +226,26 @@ export default function ManageEvent() {
                 </select>
               </label>
               <button
-                className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-extrabold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 border-line bg-white text-blue hover:bg-blue-soft"
+                className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-bold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 border-line bg-white text-blue hover:bg-blue-soft"
                 disabled={busy || !registeredId}
               >
                 Add account
               </button>
             </form>
             <button
-              className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-extrabold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 bg-blue text-white"
+              className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-bold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 bg-blue text-white"
               disabled={busy || event.players.length < 2}
-              onClick={() =>
-                run(async () => {
-                  await api(`/events/${event.id}/generate-schedule`, {
-                    method: "POST",
-                  });
+              onClick={() => prepare({
+                title: "Generate round robin matches?",
+                description: `This creates every matchup for ${event.players.length} players and locks the roster for ${event.name}.`,
+                confirmLabel: "Generate matches",
+                tone: "primary",
+                execute: async () => {
+                  await api(`/events/${event.id}/generate-schedule`, { method: "POST" });
                   await refresh();
                   await refreshEvents();
-                })
-              }
+                },
+              })}
             >
               Generate round robin schedule ↗
             </button>
@@ -235,10 +256,10 @@ export default function ManageEvent() {
           </div>
         )}
       </section>
-      <section className="overflow-hidden rounded-xl border border-line bg-white mt-[30px] p-6 [&_label]:block [&_label]:text-[11px] [&_label]:font-extrabold [&_label]:text-muted">
+      <section className="overflow-hidden rounded-xl border border-line bg-white mt-[30px] p-6 [&_label]:block [&_label]:text-[11px] [&_label]:font-bold [&_label]:text-muted">
         <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-end [&_h2]:my-1 [&_h2]:text-[22px] [&_h2]:font-bold [&_h2]:tracking-tight [&_p]:text-[13px] [&_p]:text-muted">
           <div>
-            <div className="text-[10px] font-extrabold tracking-[2px] text-blue">SCORE ACCESS</div>
+            <div className="text-[10px] font-bold tracking-[2px] text-blue">SCORE ACCESS</div>
             <h2>Event password</h2>
             <p>
               {event.has_password
@@ -251,13 +272,22 @@ export default function ManageEvent() {
           className="mt-6 flex flex-col items-stretch gap-3 border-t border-line pt-5 md:flex-row md:items-end [&_label]:flex-1"
           onSubmit={(form: FormEvent) => {
             form.preventDefault();
-            run(async () => {
-              await api(`/events/${event.id}/password`, {
-                method: "PUT",
-                body: JSON.stringify({ password }),
-              });
-              setPassword("");
-              await refresh();
+            const nextPassword = password;
+            prepare({
+              title: event.has_password ? "Change event password?" : "Set event password?",
+              description: event.has_password
+                ? "Everyone who previously entered this event password will need the new password to view and score this event."
+                : "Signed-in members will need this password to view and score the event.",
+              confirmLabel: event.has_password ? "Change password" : "Set password",
+              tone: "primary",
+              execute: async () => {
+                await api(`/events/${event.id}/password`, {
+                  method: "PUT",
+                  body: JSON.stringify({ password: nextPassword }),
+                });
+                setPassword("");
+                await refresh();
+              },
             });
           }}
         >
@@ -274,25 +304,44 @@ export default function ManageEvent() {
               onChange={(input) => setPassword(input.target.value)}
             />
           </label>
-          <button className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-extrabold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 border-line bg-white text-blue hover:bg-blue-soft" disabled={busy}>
+          <button className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-bold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 border-line bg-white text-blue hover:bg-blue-soft" disabled={busy}>
             Save password
           </button>
         </form>
       </section>
       <section className="overflow-hidden rounded-xl border border-line bg-white mt-[30px] flex flex-col items-start justify-between gap-[18px] border-red/20 bg-red-soft/30 px-6 py-[22px] md:flex-row md:items-center [&_h2]:my-1 [&_h2]:text-[19px] [&_p]:text-xs [&_p]:text-muted">
         <div>
-          <div className="text-[10px] font-extrabold tracking-[2px] text-blue">DANGER ZONE</div>
+          <div className="text-[10px] font-bold tracking-[2px] text-blue">DANGER ZONE</div>
           <h2>Delete this event</h2>
           <p>Removes its roster, match scores, and history permanently.</p>
         </div>
         <button
-          className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-extrabold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 bg-red text-white"
+          className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-bold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 bg-red text-white"
           disabled={busy}
-          onClick={removeEvent}
+          onClick={() => setShowDelete(true)}
         >
           Delete event
         </button>
       </section>
+      {showDelete && (
+        <DeleteEventDialog
+          event={event}
+          onClose={() => setShowDelete(false)}
+          onDeleted={async () => { await refreshEvents(); navigate("/"); }}
+        />
+      )}
+      {pendingAction && (
+        <ConfirmDialog
+          title={pendingAction.title}
+          description={pendingAction.description}
+          confirmLabel={pendingAction.confirmLabel}
+          tone={pendingAction.tone}
+          onClose={() => setPendingAction(null)}
+          onConfirm={confirmPending}
+          busy={pendingBusy}
+          error={pendingError}
+        />
+      )}
     </>
   );
 }

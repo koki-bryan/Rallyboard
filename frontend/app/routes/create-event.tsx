@@ -17,7 +17,7 @@ export default function CreateEvent() {
     setError("");
     setBusy(true);
     try {
-      const created = await api<{ id: number }>("/events", {
+      const created = await api<{ id: string }>("/events", {
         method: "POST",
         body: JSON.stringify({
           name,
@@ -45,7 +45,7 @@ export default function CreateEvent() {
         <h2>Coach access required</h2>
         <p>Sign in as a coach or admin to create an event.</p>
         {!user && (
-          <button className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-extrabold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 bg-blue text-white" onClick={openAuth}>
+          <button className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-bold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 bg-blue text-white" onClick={openAuth}>
             Sign in ↗
           </button>
         )}
@@ -53,9 +53,9 @@ export default function CreateEvent() {
     );
   return (
     <>
-      <div className="mb-6 md:mb-[30px] flex flex-col items-start justify-between gap-5 md:flex-row md:items-end [&_h1]:my-2.5 [&_h1]:text-[34px] md:[&_h1]:text-[42px] [&_h1]:font-bold [&_h1]:leading-tight [&_h1]:tracking-[-1.5px] [&_h1_em]:font-serif [&_h1_em]:font-normal [&_h1_em]:text-blue [&_p]:text-[13px] [&_p]:text-muted">
+      <div className="mb-6 md:mb-[30px] flex flex-col items-start justify-between gap-5 md:flex-row md:items-end [&_h1]:my-2.5 [&_h1]:text-[34px] md:[&_h1]:text-[42px] [&_h1]:font-bold [&_h1]:leading-tight [&_h1]:tracking-[-1.5px] [&_h1_em]:font-sans [&_h1_em]:font-medium [&_h1_em]:text-blue [&_p]:text-[13px] [&_p]:text-muted">
         <div>
-          <div className="flex items-center gap-2 text-[10px] font-extrabold tracking-[2px] text-blue">
+          <div className="flex items-center gap-2 text-[10px] font-bold tracking-[2px] text-blue">
             <span className="h-0.5 w-[21px] bg-blue" /> COACH DESK
           </div>
           <h1>
@@ -63,12 +63,12 @@ export default function CreateEvent() {
           </h1>
           <p>Start with the event details. Add players on the next page.</p>
         </div>
-        <Link className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-extrabold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 border-line bg-white text-blue hover:bg-blue-soft" to="/">
+        <Link className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-bold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 border-line bg-white text-blue hover:bg-blue-soft" to="/">
           Cancel
         </Link>
       </div>
-      <section className="overflow-hidden rounded-xl border border-line bg-white mt-[30px] p-6 [&_label]:block [&_label]:text-[11px] [&_label]:font-extrabold [&_label]:text-muted max-w-[760px] [&_h2]:my-2 [&_h2]:text-[22px]">
-        <div className="text-[10px] font-extrabold tracking-[2px] text-blue">NEW COMPETITION</div>
+      <section className="overflow-hidden rounded-xl border border-line bg-white mt-[30px] p-6 [&_label]:block [&_label]:text-[11px] [&_label]:font-bold [&_label]:text-muted max-w-[760px] [&_h2]:my-2 [&_h2]:text-[22px]">
+        <div className="text-[10px] font-bold tracking-[2px] text-blue">NEW COMPETITION</div>
         <h2>Event details</h2>
         <p className="mb-4 text-xs text-muted">
           The event begins as a draft. You can add players before generating the
@@ -121,7 +121,7 @@ export default function CreateEvent() {
               onChange={(input) => setPassword(input.target.value)}
             />
           </label>
-          <button className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-extrabold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 bg-blue text-white" disabled={busy}>
+          <button className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-bold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 bg-blue text-white" disabled={busy}>
             Create event ↗
           </button>
         </form>
