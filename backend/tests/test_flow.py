@@ -29,6 +29,42 @@ class FlowTests(unittest.TestCase):
 
     def tearDown(self): self.db.close()
 
+    def test_event_password_unlocks_score_entry_for_non_player(self):
+        scorer = main.User(name='Scorekeeper', email='score@example.com', password_hash='test')
+        self.db.add(scorer)
+        self.db.commit()
+        self.players[2].role = 'coach'
+        self.db.commit()
+        created = main.create_event(main.EventIn(name='New event', best_of=5, event_password='clubsecret'),
+            self.db, self.players[2])
+        event_id = created['id']
+        self.assertEqual(self.db.query(main.Match).filter_by(event_id=event_id).count(), 0)
+        main.add_player(event_id, main.AddPlayerIn(name='Floyd'), self.db, self.players[2])
+        main.add_player(event_id, main.AddPlayerIn(name='Sean'), self.db, self.players[2])
+        self.assertEqual(main.generate_schedule(event_id, self.db, self.players[2]), {'matches': 1})
+        fixture = self.db.query(main.Match).filter_by(event_id=event_id).one()
+        result = main.ResultIn(sets=[(11, 2), (11, 3), (11, 4)])
+        with self.assertRaises(main.HTTPException) as denied:
+            main.submit_result(fixture.id, result, self.db, scorer)
+        self.assertEqual(denied.exception.status_code, 403)
+        with self.assertRaises(main.HTTPException) as wrong:
+            main.join_event(event_id, main.EventPasswordIn(password='wrongpassword'), self.db, scorer)
+        self.assertEqual(wrong.exception.status_code, 403)
+        self.assertEqual(main.join_event(event_id, main.EventPasswordIn(password='clubsecret'), self.db, scorer), {'can_score': True})
+        self.assertEqual(main.submit_result(fixture.id, result, self.db, scorer), {'ok': True})
+        self.assertEqual(fixture.submitted_by, scorer.id)
+        self.assertEqual(len(self.db.query(main.Participant).filter_by(event_id=event_id).all()), 2)
+
+    def test_random_round_robin_covers_pairs_without_round_conflicts(self):
+        for count in (2, 3, 4, 5, 6):
+            schedule = main.round_robin_schedule(list(range(count)))
+            pairs = {(a, b) for _, a, b in schedule}
+            self.assertEqual(len(schedule), count * (count - 1) // 2)
+            self.assertEqual(len(pairs), len(schedule))
+            for round_number in {r for r, _, _ in schedule}:
+                players = [p for r, a, b in schedule if r == round_number for p in (a, b)]
+                self.assertEqual(len(players), len(set(players)))
+
     def test_score_validation_and_standings(self):
         with self.assertRaises(main.HTTPException):
             main.validate_result(main.ResultIn(sets=[(11,2),(12,9),(11,5)]),self.match,5)

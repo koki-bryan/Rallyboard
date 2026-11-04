@@ -3,16 +3,22 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+import random
+import uuid
 import secrets
 import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Literal
 
+from dotenv import load_dotenv
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint, create_engine, select
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint, create_engine, delete, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
+
+load_dotenv(Path(__file__).with_name('.env'))
 
 DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql+psycopg://postgres:postgres@localhost:5432/rankings')
 FRONTEND_ORIGIN = os.getenv('FRONTEND_ORIGIN', 'http://localhost:5173')
@@ -47,6 +53,18 @@ class Event(Base):
     created_by: Mapped[int] = mapped_column(ForeignKey('users.id'))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+class EventAccess(Base):
+    __tablename__ = 'event_access'
+    event_id: Mapped[int] = mapped_column(ForeignKey('events.id'), primary_key=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+
+class EventMember(Base):
+    __tablename__ = 'event_members'
+    __table_args__ = (UniqueConstraint('event_id', 'user_id'),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey('events.id'))
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
+
 class Participant(Base):
     __tablename__ = 'participants'
     __table_args__ = (UniqueConstraint('event_id', 'user_id'),)
@@ -66,6 +84,12 @@ class Match(Base):
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default='pending')
     sets: Mapped[list[SetScore]] = relationship(back_populates='match', cascade='all, delete-orphan', order_by='SetScore.number')
+
+class MatchSchedule(Base):
+    __tablename__ = 'match_schedule'
+    match_id: Mapped[int] = mapped_column(ForeignKey('matches.id'), primary_key=True)
+    round_number: Mapped[int] = mapped_column(Integer)
+    sequence_number: Mapped[int] = mapped_column(Integer)
 
 class SetScore(Base):
     __tablename__ = 'set_scores'
@@ -151,7 +175,15 @@ class Signup(Credentials):
 class EventIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     best_of: Literal[3, 5, 7]
-    player_ids: list[int] = Field(min_length=2)
+    player_ids: list[int] = Field(default_factory=list)
+    event_password: str = Field(min_length=6, max_length=128)
+
+class AddPlayerIn(BaseModel):
+    name: str | None = Field(default=None, max_length=100)
+    user_id: int | None = None
+
+class EventPasswordIn(BaseModel):
+    password: str = Field(min_length=6, max_length=128)
 
 class ResultIn(BaseModel):
     sets: list[tuple[int, int]] = Field(min_length=2, max_length=7)
@@ -162,7 +194,7 @@ class RoleIn(BaseModel):
 @app.post('/api/v1/auth/signup')
 def signup(data: Signup, response: Response, db: Session = Depends(db_session)):
     email = data.email.strip().lower()
-    if '@' not in email or len(data.password) < 8:
+    if '@' not in email or email.endswith('@players.local.invalid') or len(data.password) < 8:
         raise HTTPException(422, 'Valid email and password of at least 8 characters required')
     if db.scalar(select(User).where(User.email == email)):
         raise HTTPException(409, 'Email already registered')
@@ -203,7 +235,7 @@ def me(user: User | None = Depends(current_user)):
 
 @app.get('/api/v1/users')
 def users(db: Session = Depends(db_session), _: User = Depends(require_coach)):
-    return [user_data(u) for u in db.scalars(select(User).order_by(User.name))]
+    return [user_data(u) for u in db.scalars(select(User).where(User.role != 'guest').order_by(User.name))]
 
 @app.patch('/api/v1/users/{user_id}/role')
 def change_role(user_id: int, data: RoleIn, db: Session = Depends(db_session), admin: User = Depends(require_admin)):
@@ -223,21 +255,100 @@ def create_event(data: EventIn, db: Session = Depends(db_session), coach: User =
     ids = sorted(set(data.player_ids))
     if len(ids) != len(data.player_ids):
         raise HTTPException(422, 'Duplicate players')
-    if len(db.scalars(select(User).where(User.id.in_(ids))).all()) != len(ids):
+    if ids and len(db.scalars(select(User).where(User.id.in_(ids))).all()) != len(ids):
         raise HTTPException(422, 'Unknown player')
-    event = Event(name=data.name.strip(), best_of=data.best_of, created_by=coach.id)
+    event = Event(name=data.name.strip(), best_of=data.best_of, created_by=coach.id, status='draft')
     db.add(event)
     db.flush()
+    db.add(EventAccess(event_id=event.id, password_hash=hash_password(data.event_password)))
+    db.add(EventMember(event_id=event.id, user_id=coach.id))
     for player_id in ids:
         db.add(Participant(event_id=event.id, user_id=player_id))
-    for i, player1 in enumerate(ids):
-        for player2 in ids[i+1:]:
-            db.add(Match(event_id=event.id, player1_id=player1, player2_id=player2))
     db.commit()
     return {'id': event.id}
 
-def match_data(match: Match, names: dict[int, str]):
-    return {'id': match.id, 'player1_id': match.player1_id, 'player2_id': match.player2_id,
+@app.post('/api/v1/events/{event_id}/players')
+def add_player(event_id: int, data: AddPlayerIn, db: Session = Depends(db_session), _: User = Depends(require_coach)):
+    event = db.scalar(select(Event).where(Event.id == event_id).with_for_update())
+    if not event:
+        raise HTTPException(404, 'Event not found')
+    if event.status != 'draft':
+        raise HTTPException(409, 'Roster is locked after schedule generation')
+    if (data.name is None) == (data.user_id is None):
+        raise HTTPException(422, 'Provide a name or a registered user')
+    if data.user_id is not None:
+        player = db.get(User, data.user_id)
+        if not player:
+            raise HTTPException(404, 'User not found')
+    else:
+        name = data.name.strip()
+        if not name:
+            raise HTTPException(422, 'Player name is required')
+        player = User(name=name, email=f'{uuid.uuid4().hex}@players.local.invalid',
+                      password_hash=hash_password(secrets.token_urlsafe(32)), role='guest')
+        db.add(player)
+        db.flush()
+    existing_ids = db.scalars(select(Participant.user_id).where(Participant.event_id == event_id)).all()
+    if player.id in existing_ids or any(db.get(User, player_id).name.casefold() == player.name.casefold() for player_id in existing_ids):
+        raise HTTPException(409, 'Player is already in this event')
+    db.add(Participant(event_id=event_id, user_id=player.id))
+    db.commit()
+    return {'id': player.id, 'name': player.name}
+
+@app.delete('/api/v1/events/{event_id}/players/{player_id}')
+def remove_player(event_id: int, player_id: int, db: Session = Depends(db_session), _: User = Depends(require_coach)):
+    event = db.scalar(select(Event).where(Event.id == event_id).with_for_update())
+    if not event:
+        raise HTTPException(404, 'Event not found')
+    if event.status != 'draft':
+        raise HTTPException(409, 'Roster is locked after schedule generation')
+    participant = db.scalar(select(Participant).where(Participant.event_id == event_id, Participant.user_id == player_id))
+    if not participant:
+        raise HTTPException(404, 'Player is not in this event')
+    db.delete(participant)
+    db.commit()
+    return {'ok': True}
+
+def round_robin_schedule(player_ids: list[int]) -> list[tuple[int, int, int]]:
+    if len(player_ids) < 2:
+        raise ValueError('At least two players required')
+    players = list(player_ids)
+    random.SystemRandom().shuffle(players)
+    if len(players) % 2:
+        players.append(None)
+    pairs = []
+    for round_number in range(1, len(players)):
+        round_pairs = []
+        for i in range(len(players) // 2):
+            a, b = players[i], players[-i-1]
+            if a is not None and b is not None:
+                round_pairs.append((round_number, min(a,b), max(a,b)))
+        random.SystemRandom().shuffle(round_pairs)
+        pairs.extend(round_pairs)
+        players = [players[0], players[-1], *players[1:-1]]
+    return pairs
+
+@app.post('/api/v1/events/{event_id}/generate-schedule')
+def generate_schedule(event_id: int, db: Session = Depends(db_session), _: User = Depends(require_coach)):
+    event = db.scalar(select(Event).where(Event.id == event_id).with_for_update())
+    if not event:
+        raise HTTPException(404, 'Event not found')
+    if event.status != 'draft':
+        raise HTTPException(409, 'Schedule was already generated')
+    ids = db.scalars(select(Participant.user_id).where(Participant.event_id == event_id)).all()
+    if len(ids) < 2:
+        raise HTTPException(422, 'Add at least two players before generating matches')
+    for sequence, (round_number, a, b) in enumerate(round_robin_schedule(ids), 1):
+        match = Match(event_id=event_id, player1_id=a, player2_id=b)
+        db.add(match)
+        db.flush()
+        db.add(MatchSchedule(match_id=match.id, round_number=round_number, sequence_number=sequence))
+    event.status = 'active'
+    db.commit()
+    return {'matches': len(ids) * (len(ids)-1) // 2}
+
+def match_data(match: Match, names: dict[int, str], schedule: MatchSchedule | None = None):
+    return {'id': match.id, 'round_number': schedule.round_number if schedule else None, 'sequence_number': schedule.sequence_number if schedule else None, 'player1_id': match.player1_id, 'player2_id': match.player2_id,
             'player1': names[match.player1_id], 'player2': names[match.player2_id],
             'winner_id': match.winner_id, 'status': match.status, 'submitted_by': match.submitted_by,
             'submitted_at': match.submitted_at, 'sets': [[s.player1_points, s.player2_points] for s in match.sets]}
@@ -288,15 +399,49 @@ def standings(ids: list[int], names: dict[int, str], matches: list[Match]):
     return rows
 
 @app.get('/api/v1/events/{event_id}')
-def event_detail(event_id: int, db: Session = Depends(db_session)):
+def event_detail(event_id: int, db: Session = Depends(db_session), user: User | None = Depends(current_user)):
     event = db.get(Event, event_id)
     if not event:
         raise HTTPException(404, 'Event not found')
     ids = db.scalars(select(Participant.user_id).where(Participant.event_id == event_id)).all()
     names = {u.id: u.name for u in db.scalars(select(User).where(User.id.in_(ids)))}
     matches = db.scalars(select(Match).where(Match.event_id == event_id).order_by(Match.id)).all()
+    scheduled = {item.match_id: item for item in db.scalars(select(MatchSchedule).where(MatchSchedule.match_id.in_([m.id for m in matches])))} if matches else {}
+    matches.sort(key=lambda m: (scheduled[m.id].sequence_number if m.id in scheduled else m.id))
+    access = db.get(EventAccess, event_id)
+    member = user and db.scalar(select(EventMember.id).where(EventMember.event_id == event_id, EventMember.user_id == user.id))
+    can_score = bool(user and (user.role in ('coach', 'admin') or member))
     return {'id': event.id, 'name': event.name, 'best_of': event.best_of, 'status': event.status,
-            'standings': standings(ids, names, matches), 'matches': [match_data(m, names) for m in matches]}
+            'can_score': can_score, 'has_password': access is not None,
+            'players': [{'id': i, 'name': names[i]} for i in ids],
+            'standings': standings(ids, names, matches), 'matches': [match_data(m, names, scheduled.get(m.id)) for m in matches]}
+
+@app.post('/api/v1/events/{event_id}/join')
+def join_event(event_id: int, data: EventPasswordIn, db: Session = Depends(db_session), user: User = Depends(require_user)):
+    if not db.get(Event, event_id):
+        raise HTTPException(404, 'Event not found')
+    access = db.get(EventAccess, event_id)
+    if not access:
+        raise HTTPException(409, 'Coach must set an event password first')
+    if not verify_password(data.password, access.password_hash):
+        raise HTTPException(403, 'Incorrect event password')
+    if not db.scalar(select(EventMember.id).where(EventMember.event_id == event_id, EventMember.user_id == user.id)):
+        db.add(EventMember(event_id=event_id, user_id=user.id))
+        db.commit()
+    return {'can_score': True}
+
+@app.put('/api/v1/events/{event_id}/password')
+def set_event_password(event_id: int, data: EventPasswordIn, db: Session = Depends(db_session), _: User = Depends(require_coach)):
+    if not db.get(Event, event_id):
+        raise HTTPException(404, 'Event not found')
+    access = db.get(EventAccess, event_id)
+    if access:
+        access.password_hash = hash_password(data.password)
+        db.execute(delete(EventMember).where(EventMember.event_id == event_id))
+    else:
+        db.add(EventAccess(event_id=event_id, password_hash=hash_password(data.password)))
+    db.commit()
+    return {'ok': True}
 
 def validate_result(data: ResultIn, match: Match, best_of: int):
     target = best_of // 2 + 1
@@ -337,7 +482,10 @@ def save_result(db: Session, match: Match, data: ResultIn, actor: User, action: 
 def submit_result(match_id: int, data: ResultIn, db: Session = Depends(db_session), user: User = Depends(require_user)):
     match = db.scalar(select(Match).where(Match.id == match_id).with_for_update())
     if not match: raise HTTPException(404, 'Match not found')
+    if db.get(Event, match.event_id).status == 'draft': raise HTTPException(409, 'Generate the schedule first')
     if match.status == 'completed': raise HTTPException(409, 'Result already submitted')
+    allowed = user.role in ('coach', 'admin') or db.scalar(select(EventMember.id).where(EventMember.event_id == match.event_id, EventMember.user_id == user.id))
+    if not allowed: raise HTTPException(403, 'Enter the event password to submit scores')
     return save_result(db, match, data, user, 'before_submission')
 
 @app.put('/api/v1/matches/{match_id}/result')
