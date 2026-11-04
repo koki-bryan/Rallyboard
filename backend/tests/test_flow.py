@@ -186,4 +186,15 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(main.standings([p.id for p in self.players[:2]],{p.id:p.name for p in self.players[:2]},[self.match])[0]['name'],'Sean')
         self.assertGreater(len(self.db.query(main.Audit).all()),2)
 
+    def test_deuce_scores_and_incomplete_matches(self):
+        valid = main.ResultIn(sets=[(11, 2), (11, 3), (27, 29), (11, 5)])
+        self.assertEqual(main.validate_result(valid, self.match, 5), self.players[0].id)
+        for scores in (
+            [(11, 89), (11, 3), (11, 5)],
+            [(11, 2), (11, 3)],
+            [(11, 2), (11, 3), (2, 11), (3, 11)],
+        ):
+            with self.subTest(scores=scores), self.assertRaises(main.HTTPException):
+                main.validate_result(main.ResultIn(sets=scores), self.match, 5)
+
 if __name__ == '__main__': unittest.main()

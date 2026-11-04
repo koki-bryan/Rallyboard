@@ -1,18 +1,16 @@
 import { Link, NavLink } from "react-router";
 import type { EventItem, User } from "~/lib/types";
+import { BrandLogo } from "./BrandLogo";
 
 export function Sidebar({ events, user }: { events: EventItem[]; user: User | null }) {
   return (
     <aside className="hidden md:flex md:h-dvh md:min-h-0 md:overflow-y-auto w-[210px] lg:w-[248px] shrink-0 flex-col border-r border-line bg-blue-soft/60 px-[18px] pb-[22px] pt-[31px]" aria-label="Sidebar">
       <Link to="/" className="flex items-center gap-3 px-[11px] pb-12 text-ink no-underline">
-        <div className="grid size-[35px] shrink-0 place-items-center rounded-full border-2 border-blue bg-white">
-          <span className="size-2 rounded-full bg-red" />
-        </div>
+        <BrandLogo />
         <div>
           <strong className="block text-[21px] font-extrabold tracking-tight">
             Rallyboard<span className="text-yellow-ink">.</span>
           </strong>
-          <small className="mt-1 block text-[8px] font-extrabold tracking-[2px] text-blue">TABLE TENNIS CLUB</small>
         </div>
       </Link>
       <div className="mb-4 px-[15px] text-[10px] font-extrabold tracking-[1.7px] text-muted">WORKSPACE</div>

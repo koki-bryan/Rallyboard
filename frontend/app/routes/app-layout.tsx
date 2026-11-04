@@ -7,6 +7,7 @@ import {
   useOutletContext,
 } from "react-router";
 import { AuthDialog } from "~/components/AuthDialog";
+import { BrandLogo } from "~/components/BrandLogo";
 import { Sidebar } from "~/components/Sidebar";
 import { api } from "~/lib/api";
 import { initials, isCoach, type EventItem, type User } from "~/lib/types";
@@ -55,8 +56,9 @@ export default function AppLayout() {
       <Sidebar events={events} user={user} />
       <main ref={mainRef} className="min-w-0 flex-1 md:h-dvh md:min-h-0 md:overflow-y-auto">
         <header className="flex h-[62px] md:h-[73px] md:sticky md:top-0 md:z-10 items-center justify-between gap-5 border-b border-line bg-white px-[17px] md:px-[25px] xl:px-[42px]">
-          <Link to="/" className="block md:hidden text-xl font-extrabold tracking-tight text-ink no-underline [&_span]:text-yellow-ink">
-            Rallyboard<span>.</span>
+          <Link to="/" className="flex items-center gap-2 md:hidden text-xl font-extrabold tracking-tight text-ink no-underline">
+            <BrandLogo compact />
+            Rallyboard<span className="text-yellow-ink">.</span>
           </Link>
           <div className="hidden md:block text-xs text-muted [&_span]:mx-3 [&_span]:text-muted [&_strong]:text-ink">
             Club rankings <span>/</span>{" "}
