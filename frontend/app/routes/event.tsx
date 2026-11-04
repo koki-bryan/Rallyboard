@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { motion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import { MatchList } from "~/components/MatchList";
+import { PageIntro } from "~/components/PageIntro";
 import { DeleteEventDialog } from "~/components/DeleteEventDialog";
 import { PlayerSearch } from "~/components/PlayerSearch";
 import { ScoreDialog } from "~/components/ScoreDialog";
@@ -88,7 +89,7 @@ export default function EventPage() {
   return (
     <>
       <div className="mb-6 md:mb-[30px] flex flex-col items-start justify-between gap-5 md:flex-row md:items-end [&_h1]:my-2.5 [&_h1]:text-[34px] md:[&_h1]:text-[42px] [&_h1]:font-bold [&_h1]:leading-tight [&_h1]:tracking-[-1.5px] [&_h1_em]:font-sans [&_h1_em]:font-medium [&_h1_em]:text-blue [&_p]:text-[13px] [&_p]:text-muted">
-        <div>
+        <PageIntro key={event.id}>
           <div className="flex items-center gap-2 text-[10px] font-bold tracking-[2px] text-blue">
             <span className="h-0.5 w-[21px] bg-blue" /> CLUB COMPETITION
           </div>
@@ -96,7 +97,7 @@ export default function EventPage() {
             Rankings <em>&amp;</em> results
           </h1>
           <p>Follow the round robin. See every set, point, and place.</p>
-        </div>
+        </PageIntro>
         <div className="flex w-full flex-wrap gap-2 md:w-auto">
           {coach && (
             <Link
@@ -216,6 +217,7 @@ export default function EventPage() {
         onEdit={setEditing}
         onChanged={refresh}
       />
+      <AnimatePresence>
       {editing && (
         <ScoreDialog
           key={editing.id}
@@ -225,6 +227,8 @@ export default function EventPage() {
           onSaved={refresh}
         />
       )}
+      </AnimatePresence>
+      <AnimatePresence>
       {showDelete && (
         <DeleteEventDialog
           event={event}
@@ -232,6 +236,7 @@ export default function EventPage() {
           onDeleted={async () => { await refreshEvents(); navigate("/"); }}
         />
       )}
+      </AnimatePresence>
     </>
   );
 }

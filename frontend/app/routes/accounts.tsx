@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { AnimatePresence } from "motion/react";
 import { api } from "~/lib/api";
 import { ConfirmDialog } from "~/components/ConfirmDialog";
+import { PageIntro } from "~/components/PageIntro";
 import { initials, type User } from "~/lib/types";
 import { useApp } from "./app-layout";
 
@@ -55,7 +57,7 @@ export default function Accounts() {
   return (
     <>
       <div className="mb-6 md:mb-[30px] flex flex-col items-start justify-between gap-5 md:flex-row md:items-end [&_h1]:my-2.5 [&_h1]:text-[34px] md:[&_h1]:text-[42px] [&_h1]:font-bold [&_h1]:leading-tight [&_h1]:tracking-[-1.5px] [&_h1_em]:font-sans [&_h1_em]:font-medium [&_h1_em]:text-blue [&_p]:text-[13px] [&_p]:text-muted">
-        <div>
+        <PageIntro>
           <div className="flex items-center gap-2 text-[10px] font-bold tracking-[2px] text-blue">
             <span className="h-0.5 w-[21px] bg-blue" /> ADMINISTRATION
           </div>
@@ -63,7 +65,7 @@ export default function Accounts() {
             Account <em>roles</em>
           </h1>
           <p>Give trusted members coach access.</p>
-        </div>
+        </PageIntro>
       </div>
       {error && (
         <div className="mb-[18px] flex justify-between gap-5 rounded-lg border border-red/30 bg-red-soft px-[15px] py-[11px] text-[13px] text-red [&_button]:text-xl" role="alert">
@@ -102,7 +104,7 @@ export default function Accounts() {
           )}
         </div>
       </section>
-      {selectedAccount && <ConfirmDialog title={`${selectedAccount.role === "coach" ? "Remove coach access from" : "Give coach access to"} ${selectedAccount.name}?`} description={selectedAccount.role === "coach" ? "This person will no longer be able to create events, manage rosters, or correct results." : "This person will be able to create events, manage rosters, and correct results."} confirmLabel={selectedAccount.role === "coach" ? "Remove coach access" : "Give coach access"} tone={selectedAccount.role === "coach" ? "danger" : "primary"} onClose={() => setSelectedAccount(null)} onConfirm={changeRole} busy={busy} error={roleError} />}
+      <AnimatePresence>{selectedAccount && <ConfirmDialog title={`${selectedAccount.role === "coach" ? "Remove coach access from" : "Give coach access to"} ${selectedAccount.name}?`} description={selectedAccount.role === "coach" ? "This person will no longer be able to create events, manage rosters, or correct results." : "This person will be able to create events, manage rosters, and correct results."} confirmLabel={selectedAccount.role === "coach" ? "Remove coach access" : "Give coach access"} tone={selectedAccount.role === "coach" ? "danger" : "primary"} onClose={() => setSelectedAccount(null)} onConfirm={changeRole} busy={busy} error={roleError} />}</AnimatePresence>
     </>
   );
 }

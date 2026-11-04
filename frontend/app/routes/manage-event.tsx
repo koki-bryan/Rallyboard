@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { AnimatePresence } from "motion/react";
 import { Link, useNavigate, useParams } from "react-router";
 import { api } from "~/lib/api";
 import { isCoach, type Event, type User } from "~/lib/types";
 import { PlayerAvatar } from "~/components/PlayerAvatar";
 import { DeleteEventDialog } from "~/components/DeleteEventDialog";
 import { ConfirmDialog } from "~/components/ConfirmDialog";
+import { PageIntro } from "~/components/PageIntro";
 import { useApp } from "./app-layout";
 
 type PendingAction = {
@@ -97,7 +99,7 @@ export default function ManageEvent() {
   return (
     <>
       <div className="mb-6 md:mb-[30px] flex flex-col items-start justify-between gap-5 md:flex-row md:items-end [&_h1]:my-2.5 [&_h1]:text-[34px] md:[&_h1]:text-[42px] [&_h1]:font-bold [&_h1]:leading-tight [&_h1]:tracking-[-1.5px] [&_h1_em]:font-sans [&_h1_em]:font-medium [&_h1_em]:text-blue [&_p]:text-[13px] [&_p]:text-muted">
-        <div>
+        <PageIntro key={event.id}>
           <div className="flex items-center gap-2 text-[10px] font-bold tracking-[2px] text-blue">
             <span className="h-0.5 w-[21px] bg-blue" /> COACH DESK
           </div>
@@ -109,7 +111,7 @@ export default function ManageEvent() {
               ? "Build the roster, then generate a randomized round robin schedule."
               : "View the event and manage its score access."}
           </p>
-        </div>
+        </PageIntro>
         <Link className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-bold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 border-line bg-white text-blue hover:bg-blue-soft" to={`/events/${event.id}`}>
           View event ↗
         </Link>
@@ -323,6 +325,7 @@ export default function ManageEvent() {
           Delete event
         </button>
       </section>
+      <AnimatePresence>
       {showDelete && (
         <DeleteEventDialog
           event={event}
@@ -330,6 +333,8 @@ export default function ManageEvent() {
           onDeleted={async () => { await refreshEvents(); navigate("/"); }}
         />
       )}
+      </AnimatePresence>
+      <AnimatePresence>
       {pendingAction && (
         <ConfirmDialog
           title={pendingAction.title}
@@ -342,6 +347,7 @@ export default function ManageEvent() {
           error={pendingError}
         />
       )}
+      </AnimatePresence>
     </>
   );
 }

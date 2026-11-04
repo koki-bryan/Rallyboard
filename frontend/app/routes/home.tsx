@@ -2,6 +2,7 @@ import { Link } from "react-router";
 import { motion } from "motion/react";
 import { useApp } from "./app-layout";
 import { isCoach } from "~/lib/types";
+import { PageIntro } from "~/components/PageIntro";
 
 const MotionLink = motion.create(Link);
 export default function Home() {
@@ -9,7 +10,7 @@ export default function Home() {
   return (
     <>
       <div className="mb-6 md:mb-[30px] flex flex-col items-start justify-between gap-5 md:flex-row md:items-end [&_h1]:my-2.5 [&_h1]:text-[34px] md:[&_h1]:text-[42px] [&_h1]:font-bold [&_h1]:leading-tight [&_h1]:tracking-[-1.5px] [&_h1_em]:font-sans [&_h1_em]:font-medium [&_h1_em]:text-blue [&_p]:text-[13px] [&_p]:text-muted">
-        <div>
+        <PageIntro>
           <div className="flex items-center gap-2 text-[10px] font-bold tracking-[2px] text-blue">
             <span className="h-0.5 w-[21px] bg-blue" /> CLUB COMPETITION
           </div>
@@ -17,10 +18,10 @@ export default function Home() {
             Rankings <em>&amp;</em> results
           </h1>
           <p>Follow the round robin. See every set, point, and place.</p>
-        </div>
+        </PageIntro>
       </div>
       {events.length ? (
-        <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }} className="overflow-hidden rounded-xl border border-line bg-white p-6">
+        <section className="overflow-hidden rounded-xl border border-line bg-white p-6">
           <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-end [&_h2]:my-1 [&_h2]:text-[22px] [&_h2]:font-bold [&_h2]:tracking-tight [&_p]:text-[13px] [&_p]:text-muted">
             <div>
               <div className="text-[10px] font-bold tracking-[2px] text-blue">EVENTS</div>
@@ -29,8 +30,8 @@ export default function Home() {
             </div>
           </div>
           <div className="grid gap-2.5 [&>a]:flex [&>a]:flex-wrap [&>a]:items-center [&>a]:gap-3 [&>a]:rounded-lg [&>a]:border [&>a]:border-line [&>a]:p-3 [&>a]:text-ink [&>a]:no-underline [&>a:hover]:bg-surface [&_strong]:flex-1 [&_strong]:text-sm [&_b]:text-blue">
-            {events.map((item, index) => (
-              <MotionLink key={item.id} to={`/events/${item.id}`} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} whileHover={{ x: 3 }} whileTap={{ scale: 0.99 }} transition={{ duration: 0.22, delay: Math.min(index * 0.045, 0.27), ease: "easeOut" }}>
+            {events.map((item) => (
+              <MotionLink key={item.id} to={`/events/${item.id}`} whileHover={{ x: 2 }} whileTap={{ scale: 0.995 }} transition={{ duration: 0.16, ease: "easeOut" }}>
                 <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-blue-soft text-[21px] text-blue">✦</span>
                 <strong>{item.name}</strong>
                 <span>
@@ -40,7 +41,7 @@ export default function Home() {
               </MotionLink>
             ))}
           </div>
-        </motion.section>
+        </section>
       ) : (
         <div className="flex min-h-[380px] flex-col items-center justify-center rounded-xl bg-blue-soft p-6 text-center [&_h2]:my-2 [&_h2]:text-[31px] [&_h2]:font-bold [&_h2]:tracking-tight [&_p]:mb-[22px] [&_p]:max-w-[410px] [&_p]:text-[13px] [&_p]:leading-relaxed [&_p]:text-muted">
           <div className="text-[50px] text-yellow">✦</div>

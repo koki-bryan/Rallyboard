@@ -72,6 +72,8 @@ export default function AppLayout() {
       location.pathname.startsWith(`/events/${item.id}`) ||
       location.pathname.startsWith(`/manage/events/${item.id}`),
   );
+  const pageLabel = current?.name ||
+    (location.pathname.includes("manage") ? "Coach desk" : "Overview");
   return (
     <div className="flex min-h-screen md:h-dvh md:min-h-0 md:overflow-hidden bg-surface font-sans text-ink">
       <Sidebar events={events} user={user} />
@@ -83,12 +85,9 @@ export default function AppLayout() {
           </Link>
           <div className="hidden md:block text-xs text-muted [&_span]:mx-3 [&_span]:text-muted [&_strong]:text-ink">
             Club rankings <span>/</span>{" "}
-            <strong>
-              {current?.name ||
-                (location.pathname.includes("manage")
-                  ? "Coach desk"
-                  : "Overview")}
-            </strong>
+            <motion.strong key={pageLabel} className="inline-block" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, ease: "easeOut" }}>
+              {pageLabel}
+            </motion.strong>
           </div>
           <div className="flex min-w-0 items-center gap-3 text-xs">
             {user ? (
@@ -161,30 +160,21 @@ export default function AppLayout() {
               </Link>
             </div>
           )}
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.div
-              key={location.pathname}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-            >
-              <Outlet
-                context={
-                  {
-                    user,
-                    setUser,
-                    authReady,
-                    events,
-                    refreshEvents,
-                    openAuth: () => setShowAuth(true),
-                  } satisfies AppContext
-                }
-              />
-            </motion.div>
-          </AnimatePresence>
+          <Outlet
+            context={
+              {
+                user,
+                setUser,
+                authReady,
+                events,
+                refreshEvents,
+                openAuth: () => setShowAuth(true),
+              } satisfies AppContext
+            }
+          />
         </div>
       </main>
+      <AnimatePresence>
       {showAuth && !user && (
         <AuthDialog
           onClose={() => setShowAuth(false)}
@@ -195,6 +185,8 @@ export default function AppLayout() {
           }}
         />
       )}
+      </AnimatePresence>
+      <AnimatePresence>
       {showAccountMenu && user && (
         <Modal title="Your account" onClose={() => { if (!signingOut) setShowAccountMenu(false); }}>
           <div className="mb-5 flex items-center gap-3 rounded-xl bg-blue-soft p-3">
@@ -211,6 +203,7 @@ export default function AppLayout() {
           </div>
         </Modal>
       )}
+      </AnimatePresence>
     </div>
   );
 }

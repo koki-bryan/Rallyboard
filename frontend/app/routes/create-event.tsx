@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router";
 import { api } from "~/lib/api";
+import { PageIntro } from "~/components/PageIntro";
 import { isCoach } from "~/lib/types";
 import { useApp } from "./app-layout";
 
@@ -54,7 +55,7 @@ export default function CreateEvent() {
   return (
     <>
       <div className="mb-6 md:mb-[30px] flex flex-col items-start justify-between gap-5 md:flex-row md:items-end [&_h1]:my-2.5 [&_h1]:text-[34px] md:[&_h1]:text-[42px] [&_h1]:font-bold [&_h1]:leading-tight [&_h1]:tracking-[-1.5px] [&_h1_em]:font-sans [&_h1_em]:font-medium [&_h1_em]:text-blue [&_p]:text-[13px] [&_p]:text-muted">
-        <div>
+        <PageIntro>
           <div className="flex items-center gap-2 text-[10px] font-bold tracking-[2px] text-blue">
             <span className="h-0.5 w-[21px] bg-blue" /> COACH DESK
           </div>
@@ -62,7 +63,7 @@ export default function CreateEvent() {
             Create an <em>event</em>
           </h1>
           <p>Start with the event details. Add players on the next page.</p>
-        </div>
+        </PageIntro>
         <Link className="inline-flex min-h-10 items-center justify-center gap-4 whitespace-nowrap rounded-lg border border-transparent px-4 py-2.5 text-xs font-bold no-underline transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 border-line bg-white text-blue hover:bg-blue-soft" to="/">
           Cancel
         </Link>

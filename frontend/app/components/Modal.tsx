@@ -44,8 +44,8 @@ export function Modal({ title, onClose, children, destructive = false }: Props) 
 
   if (typeof document === "undefined") return null;
   return createPortal(
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.18 }} className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <motion.section initial={{ opacity: 0, y: 18, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }} ref={dialogRef} role={destructive ? "alertdialog" : "dialog"} aria-modal="true" aria-labelledby={titleId} className="max-h-[90dvh] w-full max-w-[480px] overflow-y-auto rounded-2xl border border-line bg-white p-6 shadow-2xl md:p-7">
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.16 }} className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <motion.section initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 5 }} transition={{ duration: 0.18, ease: "easeOut" }} ref={dialogRef} role={destructive ? "alertdialog" : "dialog"} aria-modal="true" aria-labelledby={titleId} className="max-h-[90dvh] w-full max-w-[480px] overflow-y-auto rounded-2xl border border-line bg-white p-6 shadow-2xl md:p-7">
         <div className="mb-5 flex items-start justify-between gap-5">
           <h2 id={titleId} className="text-[22px] font-bold leading-tight tracking-tight text-ink">{title}</h2>
           <button type="button" aria-label="Close dialog" onClick={onClose} className="rounded-md px-1 text-xl leading-none text-muted hover:bg-surface hover:text-ink">×</button>
